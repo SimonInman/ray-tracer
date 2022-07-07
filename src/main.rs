@@ -1,3 +1,4 @@
+use std::cmp;
 use std::f32::consts;
 use std::fs;
 use std::iter;
@@ -17,9 +18,10 @@ fn main() {
 
     // World
     let material_ground = Lambertian{albedo:Colour{x: 0.8, y:0.8, z:0.0}};
-    let material_centre = Lambertian{albedo:Colour{x: 0.7, y:0.3, z:0.3}};
-    let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}};
-    let material_right = Metal{albedo:Colour{x: 0.8, y:0.6, z:0.2}};
+    let material_centre = Lambertian{albedo:Colour{x: 0.1, y:0.2, z:0.5}};
+    // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
+    let material_left = Dielectric{index_of_refraction: 1.5};
+    let material_right = Metal{albedo:Colour{x: 0.8, y:0.6, z:0.2}, fuzz:1.0};
 
 
     let mut world_list: Vec<Box<dyn HittableObject>> = Vec::new();
@@ -36,7 +38,7 @@ fn main() {
     world_list.push(Box::new(Sphere {
         centre: Vec3 { x: -1.0, y: 0.0, z: -1.0 },
         radius: 0.5,
-        material: Material::Metal(material_left),
+        material: Material::Dielectric(material_left),
     }));
     world_list.push(Box::new(Sphere {
         centre: Vec3 { x: 1.0, y: 0.0, z: -1.0 },
@@ -615,6 +617,7 @@ fn random_unit_vector() -> Vec3 {
 enum Material {
     Lambertian(Lambertian),
     Metal(Metal),
+    Dielectric(Dielectric),
 }
 
 impl Material {
@@ -622,8 +625,8 @@ impl Material {
         match *self {
             Material::Lambertian(lamberian) =>
             lamberian.scatter(ray_in, hit_record),
-            Material::Metal(metal) => metal.scatter(ray_in, hit_record)
-            
+            Material::Metal(metal) => metal.scatter(ray_in, hit_record),
+            Material::Dielectric(dielectric) => dielectric.scatter(ray_in, hit_record),
         }
     }
 }
@@ -652,16 +655,29 @@ impl Lambertian {
     
 }
 
+// I didn't really follow the whole derivation of this. 
+// See section 10.2
+fn refract(uv: Vec3, normal: Vec3, eta_over_eta_prime: f32) -> Vec3 {
+    let cos_theta = f32::min(dot(uv.multiply(-1.0), normal) ,1.0);
+    let cos_theta_n = normal.multiply(cos_theta);
+    let r_out_perp =  cos_theta_n.add(&uv).multiply(eta_over_eta_prime);
+    let multiplier = (1.0 - r_out_perp.length_squared()).sqrt();
+    let r_out_parallel = normal.multiply(-1.0 * multiplier);
+    return r_out_perp.add(&r_out_parallel);
+}
+
 #[derive(Clone, Copy)]
 struct Metal {
     albedo: Colour ,
+    fuzz: f32,
 }
 
 // impl Material for Metal {
 impl Metal {
     fn scatter(&self, ray_in : Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
        let reflected = reflect(ray_in.direction,hit_record.normal); 
-       let scattered_ray = Ray{origin: hit_record.p, direction: reflected};
+       let noise = &random_in_unit_sphere().multiply(self.fuzz);
+       let scattered_ray = Ray{origin: hit_record.p, direction: reflected.add(noise)};
 
        // Hmm, how could this happen? I think maybe if the ray hit the inside
        // of the surface.
@@ -670,7 +686,35 @@ impl Metal {
        }
        return Some((scattered_ray, self.albedo));
     }
-    
+}
+
+#[derive(Clone, Copy)]
+struct Dielectric {
+    index_of_refraction: f32, 
+}
+impl  Dielectric  {
+    fn scatter(&self, ray_in : Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+        let attenuation = Colour{x: 1.0, y: 1.0, z: 1.0};
+        let refraction_ratio = if hit_record.is_front_face { 1.0/self.index_of_refraction } else { self.index_of_refraction} ;
+
+        let unit_direction = ray_in.direction.unit_vector();
+
+        let cos_theta = f32::min(
+            dot(unit_direction.multiply(-1.0), hit_record.normal),
+             1.0);
+        let sin_theta = (1.0 - cos_theta*cos_theta).sqrt();
+        let cannot_refract = (refraction_ratio * sin_theta) > 1.0;
+
+        let direction = if cannot_refract {
+            reflect(unit_direction, hit_record.normal)
+        } else {
+        refract(unit_direction, hit_record.normal, refraction_ratio)
+        };
+
+        let scattered_ray = Ray{origin:hit_record.p, direction};
+
+       return Some((scattered_ray, attenuation));
+    }
 }
 
 // Get the reflection off vector after hitting a surface with unit normal
