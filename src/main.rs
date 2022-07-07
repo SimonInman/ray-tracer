@@ -41,6 +41,11 @@ fn main() {
         material: Material::Dielectric(material_left),
     }));
     world_list.push(Box::new(Sphere {
+        centre: Vec3 { x: -1.0, y: 0.0, z: -1.0 },
+        radius: -0.4,
+        material: Material::Dielectric(material_left),
+    }));
+    world_list.push(Box::new(Sphere {
         centre: Vec3 { x: 1.0, y: 0.0, z: -1.0 },
         radius: 0.5,
         material: Material::Metal(material_right),
@@ -589,6 +594,11 @@ fn fake_random_unit(seed: f32) -> f32 {
     return fraction_part * if randomly_negative { -1.0 } else { 1.0 };
 }
 
+fn random_unit() -> f32 {
+    let mut rng = rand::thread_rng();
+    return  rng.gen_range(0.0..1.0);
+}
+
 fn random_vec3() -> Vec3 {
     let mut rng = rand::thread_rng();
 
@@ -705,7 +715,7 @@ impl  Dielectric  {
         let sin_theta = (1.0 - cos_theta*cos_theta).sqrt();
         let cannot_refract = (refraction_ratio * sin_theta) > 1.0;
 
-        let direction = if cannot_refract {
+        let direction = if cannot_refract || reflectance(cos_theta, refraction_ratio) > random_unit() {
             reflect(unit_direction, hit_record.normal)
         } else {
         refract(unit_direction, hit_record.normal, refraction_ratio)
@@ -715,7 +725,16 @@ impl  Dielectric  {
 
        return Some((scattered_ray, attenuation));
     }
+
 }
+
+    // Schlick's approximation for reflectance - this wasn't even explained!
+fn reflectance(cosine: f32, refraction_ratio: f32) -> f32 {
+        let r0 = (1.0 - refraction_ratio)/(1.0 + refraction_ratio);
+        let r0_squared = r0 * r0;
+        return r0_squared + (1.0 - r0) * (1.0 - cosine).powi(5);
+}
+
 
 // Get the reflection off vector after hitting a surface with unit normal
 // surface_normal.
