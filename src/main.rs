@@ -9,6 +9,7 @@ use rand::Rng;
 const MAX_T: f32 = 20000.0;
 
 fn main() {
+    let r = (std::f32::consts::PI/4.0).cos();
     // Image
     let aspect_ratio = 16.0 / 9.0;
     let image_width = 400;
@@ -22,6 +23,9 @@ fn main() {
     // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
     let material_left = Dielectric{index_of_refraction: 1.5};
     let material_right = Metal{albedo:Colour{x: 0.8, y:0.6, z:0.2}, fuzz:1.0};
+
+    // let material_left = Lambertian{albedo:Colour{x: 0.0, y:0.0, z:1.0}};
+    // let material_right = Lambertian{albedo:Colour{x: 1.0, y:0.0, z:0.0}};
 
 
     let mut world_list: Vec<Box<dyn HittableObject>> = Vec::new();
@@ -50,37 +54,32 @@ fn main() {
         radius: 0.5,
         material: Material::Metal(material_right),
     }));
+
+    // world_list.push(Box::new(Sphere {
+    //     centre: Vec3 { x: -r, y: 0.0, z: -1.0 },
+    //     radius: r,
+    //     material: Material::Lambertian(material_left),
+    // }));
+    // world_list.push(Box::new(Sphere {
+    //     centre: Vec3 { x: r, y: 0.0, z: -1.0 },
+    //     radius: r,
+    //     material: Material::Lambertian(material_right),
+    // }));
+
+
+
     let world = HittableList {
         objects: &world_list,
     };
 
-    // Camera
-    // let viewport_height = 2.0;
-    // let viewport_width = aspect_ratio * viewport_height;
-    // let focal_length = 1.0;
-
-    // let origin = Point3 {
-    //     x: 0.0,
-    //     y: 0.0,
-    //     z: 0.0,
-    // };
-    // let horizontal = Point3 {
-    //     x: viewport_width,
-    //     y: 0.0,
-    //     z: 0.0,
-    // };
-    // let vertical = Point3 {
-    //     x: 0.0,
-    //     y: viewport_height,
-    //     z: 0.0,
-    // };
-    // let half_plane = horizontal.multiply(0.5).add(&vertical.multiply(0.5));
-    // let lower_left_corner = origin.subtract(&half_plane).subtract(&Point3 {
-    //     x: 0.0,
-    //     y: 0.0,
-    //     z: focal_length,
-    // });
-    let camera = default_camera();
+    let look_from = Point3{x: -2.0, y: 2.0, z: 1.0};
+    let look_at = Point3{x: 0.0, y: 0.0, z: -1.0};
+    let v_up = Vec3{x: 0.0, y: 1.0, z: 0.0};
+    let camera = build_camera(
+        look_from,
+        look_at,
+        v_up,
+        20.0, aspect_ratio);
 
     // Render
     println!("P3");
@@ -176,6 +175,13 @@ fn write_pixel(colour: Colour, samples_per_pixel: i32) {
 
 fn dot(a: Vec3, b: Vec3) -> f32 {
     return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+fn cross(u: Vec3, v: Vec3) -> Vec3 {
+    return Vec3{
+        x: (u.y * v.z) - u.z * v.y,
+        y: (u.z * v.x) - u.x * v.z,
+        z: (u.x * v.y) - u.y * v.x,
+    }
 }
 
 // You can form a vector quadratic equation using the extension of the Ray (which is itself a function of time, t),
@@ -280,7 +286,7 @@ fn ray_colour(ray: Ray, world: &HittableList, depth: i32, seed: f32) -> Colour {
 type Colour = Vec3;
 type Point3 = Vec3;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct Vec3 {
     x: f32,
     y: f32,
@@ -513,34 +519,39 @@ impl Camera {
     }
 }
 
-fn default_camera() -> Camera {
-    let viewport_height = 2.0;
-    let aspect_ratio = 16.0 / 9.0;
+// look_from is the position of the camera.
+// look_at is where the camera is pointing to (note: it is a point, rather than a direction)
+// v_up is an "up" vector for the camera. look_from and look_at only specify 
+// the camera within a rotation (think of tilting your head while fixing your gaze)
+fn build_camera(
+    look_from: Point3,
+    look_at: Point3,
+    v_up: Vec3,
+    vertical_field_of_view: f32, aspect_ratio: f32, 
+) -> Camera {
+    let theta = degrees_to_radians(vertical_field_of_view);
+    let h = (theta/2.0).tan();
+    let viewport_height = 2.0 * h;
     let viewport_width = aspect_ratio * viewport_height;
+
+    // We're going to build a basis for the vector space. 
+    // w is s.t. -w is the camera angle. 
+    let w = look_from.subtract(&look_at).unit_vector();
+    let u = cross(v_up, w);
+    let v = cross(w, u);
+
+
+    // let viewport_height = 2.0;
+    // let aspect_ratio = 16.0 / 9.0;
+    // let viewport_width = aspect_ratio * viewport_height;
     let focal_length = 1.0;
 
-    let origin = Point3 {
-        x: 0.0,
-        y: 0.0,
-        z: 0.0,
-    };
-    let horizontal = Point3 {
-        x: viewport_width,
-        y: 0.0,
-        z: 0.0,
-    };
-    let vertical = Point3 {
-        x: 0.0,
-        y: viewport_height,
-        z: 0.0,
-    };
+    let origin = look_from;
+    let horizontal = u.multiply(viewport_width);
+    let vertical = v.multiply(viewport_height);
 
     let half_plane = horizontal.multiply(0.5).add(&vertical.multiply(0.5));
-    let lower_left_corner = origin.subtract(&half_plane).subtract(&Point3 {
-        x: 0.0,
-        y: 0.0,
-        z: focal_length,
-    });
+    let lower_left_corner = origin.subtract(&half_plane).subtract(&w);
 
     return Camera {
         aspect_ratio: 16.0 / 9.0,
@@ -553,6 +564,10 @@ fn default_camera() -> Camera {
         vertical,
         lower_left_corner,
     };
+}
+
+fn degrees_to_radians(degrees: f32) -> f32 {
+    return degrees *  std::f32::consts::PI/180.0;
 }
 
 fn clamp(x: f32, min: f32, max: f32) -> f32 {
