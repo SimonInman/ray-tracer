@@ -72,14 +72,19 @@ fn main() {
         objects: &world_list,
     };
 
-    let look_from = Point3{x: -2.0, y: 2.0, z: 1.0};
+    let look_from = Point3{x: 3.0, y: 3.0, z: 2.0};
     let look_at = Point3{x: 0.0, y: 0.0, z: -1.0};
     let v_up = Vec3{x: 0.0, y: 1.0, z: 0.0};
+    let dist_to_focus = (look_from.subtract(&look_at)).length();
+    let aperture = 2.0;
     let camera = build_camera(
         look_from,
         look_at,
         v_up,
-        20.0, aspect_ratio);
+        20.0, aspect_ratio,
+        aperture,
+        dist_to_focus,
+    );
 
     // Render
     println!("P3");
@@ -108,6 +113,7 @@ fn main() {
         }
     }
 }
+
 
 // fn ray_colour(ray: Ray) -> Colour {
 //     // println!("ray.direction.y is {}",ray.direction.y);
@@ -502,17 +508,28 @@ struct Camera {
     horizontal: Vec3,
     vertical: Vec3,
     lower_left_corner: Vec3,
+
+    u: Vec3,
+    v: Vec3,
+    w: Vec3,
+    lens_radius: f32,
 }
 
 impl Camera {
-    fn get_ray(&self, u: f32, v: f32) -> Ray {
+    fn get_ray(&self, s: f32, t: f32) -> Ray {
+        let rd = random_in_unit_disk().multiply(self.lens_radius);
+        let offset = self.u.multiply(rd.x ).add(&&self.v.multiply(rd.y));
+
+
         let ray_direction = self
             .lower_left_corner
-            .add(&self.horizontal.multiply(u as f32))
-            .add(&self.vertical.multiply(v as f32))
-            .subtract(&self.origin);
+            .add(&self.horizontal.multiply(s as f32))
+            .add(&self.vertical.multiply(t as f32))
+            .subtract(&self.origin)
+            .subtract(&offset);
+
         let ray = Ray {
-            origin: self.origin,
+            origin: self.origin.add(&offset),
             direction: ray_direction,
         };
         return ray;
@@ -528,6 +545,8 @@ fn build_camera(
     look_at: Point3,
     v_up: Vec3,
     vertical_field_of_view: f32, aspect_ratio: f32, 
+    aperture: f32,
+    focus_dist: f32,
 ) -> Camera {
     let theta = degrees_to_radians(vertical_field_of_view);
     let h = (theta/2.0).tan();
@@ -547,11 +566,13 @@ fn build_camera(
     let focal_length = 1.0;
 
     let origin = look_from;
-    let horizontal = u.multiply(viewport_width);
-    let vertical = v.multiply(viewport_height);
+    let horizontal = u.multiply(viewport_width).multiply(focus_dist);
+    let vertical = v.multiply(viewport_height).multiply(focus_dist);
 
     let half_plane = horizontal.multiply(0.5).add(&vertical.multiply(0.5));
-    let lower_left_corner = origin.subtract(&half_plane).subtract(&w);
+    let lower_left_corner = origin.subtract(&half_plane).subtract(&&w.multiply(focus_dist));
+
+    let lens_radius = aperture / 2.0;
 
     return Camera {
         aspect_ratio: 16.0 / 9.0,
@@ -563,6 +584,9 @@ fn build_camera(
         horizontal,
         vertical,
         lower_left_corner,
+
+        u, v, w,
+        lens_radius,
     };
 }
 
@@ -622,6 +646,17 @@ fn random_vec3() -> Vec3 {
         y: rng.gen_range(0.0..1.0),
         z: rng.gen_range(0.0..1.0),
     };
+}
+
+fn random_in_unit_disk() -> Vec3 {
+    loop {
+        let p = random_vec3();
+        let q = Vec3{x: p.x, y: p.y, z: 0.0};
+        if q.length_squared() >= 1.0 {
+            continue;
+        }
+        return q;
+    }
 }
 
 fn random_in_unit_sphere() -> Vec3 {
