@@ -1,59 +1,100 @@
-use std::cmp;
+use rand::Rng;
+use rayon::iter::Fold;
+use std::ops;
 use std::f32::consts;
 use std::fs;
 use std::iter;
 use std::ops::Rem;
-use rand::Rng;
-
+use rayon::prelude::*;
 
 const MAX_T: f32 = 20000.0;
 
 fn main() {
-    let r = (std::f32::consts::PI/4.0).cos();
+    let r = (std::f32::consts::PI / 4.0).cos();
     // Image
-    let aspect_ratio = 16.0 / 9.0;
-    let image_width = 400;
+    let aspect_ratio = 3.0 / 2.0;
+    let image_width = 1200;
     let image_height: i32 = (image_width as f32 / aspect_ratio) as i32;
-    let samples_per_pixel = 100;
+    let samples_per_pixel = 500;
     let max_depth = 50;
 
     // World
-    let material_ground = Lambertian{albedo:Colour{x: 0.8, y:0.8, z:0.0}};
-    let material_centre = Lambertian{albedo:Colour{x: 0.1, y:0.2, z:0.5}};
+    let material_ground = Lambertian {
+        albedo: Colour {
+            x: 0.8,
+            y: 0.8,
+            z: 0.0,
+        },
+    };
+    let material_centre = Lambertian {
+        albedo: Colour {
+            x: 0.1,
+            y: 0.2,
+            z: 0.5,
+        },
+    };
     // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
-    let material_left = Dielectric{index_of_refraction: 1.5};
-    let material_right = Metal{albedo:Colour{x: 0.8, y:0.6, z:0.2}, fuzz:1.0};
+    let material_left = Dielectric {
+        index_of_refraction: 1.5,
+    };
+    let material_right = Metal {
+        albedo: Colour {
+            x: 0.8,
+            y: 0.6,
+            z: 0.2,
+        },
+        fuzz: 1.0,
+    };
 
     // let material_left = Lambertian{albedo:Colour{x: 0.0, y:0.0, z:1.0}};
     // let material_right = Lambertian{albedo:Colour{x: 1.0, y:0.0, z:0.0}};
 
-
-    let mut world_list: Vec<Box<dyn HittableObject>> = Vec::new();
-    world_list.push(Box::new(Sphere {
-        centre: Vec3 { x: 0.0, y: -100.5, z: -1.0},
-        radius: 100.0,
-        material: Material::Lambertian(material_ground),
-    }));
-    world_list.push(Box::new(Sphere {
-        centre: Vec3 { x: 0.0, y: 0.0, z: -1.0 },
-        radius: 0.5,
-        material: Material::Lambertian(material_centre),
-    }));
-    world_list.push(Box::new(Sphere {
-        centre: Vec3 { x: -1.0, y: 0.0, z: -1.0 },
-        radius: 0.5,
-        material: Material::Dielectric(material_left),
-    }));
-    world_list.push(Box::new(Sphere {
-        centre: Vec3 { x: -1.0, y: 0.0, z: -1.0 },
-        radius: -0.4,
-        material: Material::Dielectric(material_left),
-    }));
-    world_list.push(Box::new(Sphere {
-        centre: Vec3 { x: 1.0, y: 0.0, z: -1.0 },
-        radius: 0.5,
-        material: Material::Metal(material_right),
-    }));
+    // let mut world_list: Vec<Box<dyn HittableObject>> = Vec::new();
+    // world_list.push(Box::new(Sphere {
+    //     centre: Vec3 {
+    //         x: 0.0,
+    //         y: -100.5,
+    //         z: -1.0,
+    //     },
+    //     radius: 100.0,
+    //     material: Material::Lambertian(material_ground),
+    // }));
+    // world_list.push(Box::new(Sphere {
+    //     centre: Vec3 {
+    //         x: 0.0,
+    //         y: 0.0,
+    //         z: -1.0,
+    //     },
+    //     radius: 0.5,
+    //     material: Material::Lambertian(material_centre),
+    // }));
+    // world_list.push(Box::new(Sphere {
+    //     centre: Vec3 {
+    //         x: -1.0,
+    //         y: 0.0,
+    //         z: -1.0,
+    //     },
+    //     radius: 0.5,
+    //     material: Material::Dielectric(material_left),
+    // }));
+    // world_list.push(Box::new(Sphere {
+    //     centre: Vec3 {
+    //         x: -1.0,
+    //         y: 0.0,
+    //         z: -1.0,
+    //     },
+    //     radius: -0.4,
+    //     material: Material::Dielectric(material_left),
+    // }));
+    // world_list.push(Box::new(Sphere {
+    //     centre: Vec3 {
+    //         x: 1.0,
+    //         y: 0.0,
+    //         z: -1.0,
+    //     },
+    //     radius: 0.5,
+    //     material: Material::Metal(material_right),
+    // }));
 
     // world_list.push(Box::new(Sphere {
     //     centre: Vec3 { x: -r, y: 0.0, z: -1.0 },
@@ -66,22 +107,38 @@ fn main() {
     //     material: Material::Lambertian(material_right),
     // }));
 
-
-
+    let build_spheres = many_spheres();
     let world = HittableList {
-        objects: &world_list,
+        objects: &build_spheres,
     };
 
-    let look_from = Point3{x: 3.0, y: 3.0, z: 2.0};
-    let look_at = Point3{x: 0.0, y: 0.0, z: -1.0};
-    let v_up = Vec3{x: 0.0, y: 1.0, z: 0.0};
-    let dist_to_focus = (look_from.subtract(&look_at)).length();
-    let aperture = 2.0;
+    // let world = HittableList {
+    //     objects: &world_list,
+    // };
+
+    let look_from = Point3 {
+        x: 13.0,
+        y: 2.0,
+        z: 3.0,
+    };
+    let look_at = Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    let v_up = Vec3 {
+        x: 0.0,
+        y: 1.0,
+        z: 0.0,
+    };
+    let dist_to_focus = 10.0;
+    let aperture = 0.1;
     let camera = build_camera(
         look_from,
         look_at,
         v_up,
-        20.0, aspect_ratio,
+        20.0,
+        aspect_ratio,
         aperture,
         dist_to_focus,
     );
@@ -97,23 +154,182 @@ fn main() {
     // See https://raytracing.github.io/images/fig-1.03-cam-geom.jpg
     for j in (0..image_height).rev() {
         for i in 0..image_width {
-            let mut pixel_colour = Colour {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            };
-            for sample in 0..samples_per_pixel {
+            // let mut pixel_colour = Colour {
+            //     x: 0.0,
+            //     y: 0.0,
+            //     z: 0.0,
+            // };
+
+            let aggregated_pixel = (0..samples_per_pixel).into_par_iter().map(|sample| {
                 let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
                 let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
                 let ray = camera.get_ray(u, v);
-                pixel_colour = pixel_colour.add(&ray_colour(ray, &world, max_depth, fake_random(sample, false) * 100.0));
-
+                return ray_colour(
+                    ray,
+                    &world,
+                    max_depth,
+                    fake_random(sample, false) * 100.0,
+                )
             }
-            write_pixel(pixel_colour, samples_per_pixel);
+            ).reduce(|| Colour{x:0.0,y:0.0,z:0.0},
+                |accum, color| accum.add(&color));
+
+
+            // for sample in 0..samples_per_pixel {
+            //     let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
+            //     let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
+            //     let ray = camera.get_ray(u, v);
+            //     pixel_colour = pixel_colour.add(&ray_colour(
+            //         ray,
+            //         &world,
+            //         max_depth,
+            //         fake_random(sample, false) * 100.0,
+            //     ));
+            // }
+            write_pixel(aggregated_pixel, samples_per_pixel);
         }
     }
 }
 
+fn many_spheres() -> Vec<Box<dyn HittableObject>> {
+    let material_ground = Lambertian {
+        albedo: Colour {
+            x: 0.5,
+            y: 0.5,
+            z: 0.5,
+        },
+    };
+    let material_lambertian = Lambertian {
+        albedo: Colour {
+            x: 0.4,
+            y: 0.2,
+            z: 0.1,
+        },
+    };
+    // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
+    let material_glass = Dielectric {
+        index_of_refraction: 1.5,
+    };
+
+    // let material_left = Lambertian{albedo:Colour{x: 0.0, y:0.0, z:1.0}};
+    // let material_right = Lambertian{albedo:Colour{x: 1.0, y:0.0, z:0.0}};
+
+    let mut world_list: Vec<Box<dyn HittableObject>> = Vec::new();
+    // Add "ground" sphere.
+    world_list.push(Box::new(Sphere {
+        centre: Vec3 {
+            x: 0.0,
+            y: -1000.0,
+            z: 0.0,
+        },
+        radius: 1000.0,
+        material: Material::Lambertian(material_ground),
+    }));
+
+    let world_size = 11;
+
+    for a in -world_size..world_size {
+        for b in -world_size..world_size {
+            let noise = random_unit();
+            let centre = Vec3 {
+                x: random_unit() * 0.9 + a as f32,
+                y: 0.2,
+                z: random_unit() * 0.9 + b as f32,
+            };
+
+            let threshold_point = Point3 {
+                x: 4.0,
+                y: 0.2,
+                z: 0.0,
+            };
+            // Don't render if we're too near?
+            if centre.subtract(&threshold_point).length() > 0.9 {
+                if noise < 0.8 {
+                    // Diffuse material
+                    world_list.push(Box::new(Sphere {
+                        centre: centre,
+                        radius: 0.2,
+                        material: Material::Lambertian(random_lambertian()),
+                    }));
+                } else if noise < 0.95 {
+                    // Metal
+                    world_list.push(Box::new(Sphere {
+                        centre: centre,
+                        radius: 0.2,
+                        material: Material::Metal(random_metal()),
+                    }));
+                } else {
+                    //glass
+                    world_list.push(Box::new(Sphere {
+                        centre: centre,
+                        radius: 0.2,
+                        material: Material::Dielectric(material_glass),
+                    }));
+                }
+            }
+        }
+    }
+
+    world_list.push(Box::new(Sphere {
+        centre: Vec3 {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        radius: 1.0,
+        material: Material::Dielectric(material_glass),
+    }));
+    world_list.push(Box::new(Sphere {
+        centre: Vec3 {
+            x: -4.0,
+            y: 1.0,
+            z: 0.0,
+        },
+        radius: 1.0,
+        material: Material::Lambertian(material_lambertian),
+    }));
+    let material_metal = Metal {
+        albedo: Colour {
+            x: 0.7,
+            y: 0.6,
+            z: 0.5,
+        },
+        fuzz: 0.0,
+    };
+    world_list.push(Box::new(Sphere {
+        centre: Vec3 { x: 4.0, y: 1.0, z: 0.0 },
+        radius: 1.0,
+        material: Material::Metal(material_metal),
+    }));
+    return world_list;
+}
+
+fn random_lambertian() -> Lambertian {
+    // Sample code does:
+    // auto albedo = color::random() * color::random();
+    // which is a pointwise multipleication of random colours.
+    return Lambertian {
+        albedo: Colour {
+            x: random_unit() * random_unit(),
+            y: random_unit() * random_unit(),
+            z: random_unit() * random_unit(),
+        },
+    };
+}
+
+fn random_metal() -> Metal {
+    let mut rng = rand::thread_rng();
+
+    let fuzz = rng.gen_range(0.0..0.5);
+    return Metal {
+        albedo: Colour {
+            x: rng.gen_range(0.5..1.0),
+            y: rng.gen_range(0.5..1.0),
+            z: rng.gen_range(0.5..1.0),
+        },
+        fuzz: fuzz,
+    };
+}
 
 // fn ray_colour(ray: Ray) -> Colour {
 //     // println!("ray.direction.y is {}",ray.direction.y);
@@ -183,11 +399,11 @@ fn dot(a: Vec3, b: Vec3) -> f32 {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 fn cross(u: Vec3, v: Vec3) -> Vec3 {
-    return Vec3{
+    return Vec3 {
         x: (u.y * v.z) - u.z * v.y,
         y: (u.z * v.x) - u.x * v.z,
         z: (u.x * v.y) - u.y * v.x,
-    }
+    };
 }
 
 // You can form a vector quadratic equation using the extension of the Ray (which is itself a function of time, t),
@@ -238,20 +454,25 @@ fn ray_colour(ray: Ray, world: &HittableList, depth: i32, seed: f32) -> Colour {
     let maybe_hit_record = world.hit(&ray, 0.001, MAX_T);
     match maybe_hit_record {
         Some(hit_record) => {
-
             let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
             match maybe_reflection {
                 //todo rename colour to attenutation when i understand what that is.
                 Some((reflected_ray, surface_colour)) => {
                     let reflection_colour = ray_colour(reflected_ray, world, depth - 1, seed);
-                    return Colour{
+                    return Colour {
                         x: surface_colour.x * reflection_colour.x,
                         y: surface_colour.y * reflection_colour.y,
                         z: surface_colour.z * reflection_colour.z,
                     };
                 }
 
-                None => return Colour{x: 0.0, y: 0.0, z: 0.0}
+                None => {
+                    return Colour {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    }
+                }
             }
 
             // // This is where the reflection bounces to, featuring a random variation.
@@ -261,7 +482,7 @@ fn ray_colour(ray: Ray, world: &HittableList, depth: i32, seed: f32) -> Colour {
 
             // let reflected_ray = Ray {
             //     origin: hit_record.p,
-            //     // 
+            //     //
             //     direction: target.subtract(&hit_record.p),
             // };
             // let colour_at_target = ray_colour(reflected_ray, world, depth - 1, seed + 1.0);
@@ -298,6 +519,15 @@ struct Vec3 {
     y: f32,
     z: f32,
 }
+
+// impl  ops::Add<Vec3> for Vec3 {
+//     fn add(self, to_add: Vec3) -> Vec3 {
+//         return self.add(to_add);
+//     }
+
+//     type Output = Vec3;
+    
+// }
 
 impl Vec3 {
     fn add(&self, other: &Vec3) -> Vec3 {
@@ -388,10 +618,13 @@ impl Ray {
     }
 }
 
-
-fn hit_record_with_norml<'a>(p: Vec3, t: f32, 
-    material: &Material, 
-    ray: &Ray, outward_normal: Vec3) -> HitRecord {
+fn hit_record_with_norml<'a>(
+    p: Vec3,
+    t: f32,
+    material: &Material,
+    ray: &Ray,
+    outward_normal: Vec3,
+) -> HitRecord {
     let is_front_face = dot(ray.direction, outward_normal) < 0.0;
     let normal = if is_front_face {
         outward_normal
@@ -455,7 +688,7 @@ impl HittableObject for HittableList<'_> {
     }
 }
 
-trait HittableObject {
+trait HittableObject : Sync {
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord>;
 }
 
@@ -492,9 +725,13 @@ impl HittableObject for Sphere {
         }
         let p = ray.at(root);
         let outward_normal = p.subtract(&self.centre).divide(self.radius);
-        return Some(hit_record_with_norml(p, root, 
+        return Some(hit_record_with_norml(
+            p,
+            root,
             &self.material,
-            ray, outward_normal ));
+            ray,
+            outward_normal,
+        ));
     }
 }
 
@@ -518,8 +755,7 @@ struct Camera {
 impl Camera {
     fn get_ray(&self, s: f32, t: f32) -> Ray {
         let rd = random_in_unit_disk().multiply(self.lens_radius);
-        let offset = self.u.multiply(rd.x ).add(&&self.v.multiply(rd.y));
-
+        let offset = self.u.multiply(rd.x).add(&&self.v.multiply(rd.y));
 
         let ray_direction = self
             .lower_left_corner
@@ -538,27 +774,27 @@ impl Camera {
 
 // look_from is the position of the camera.
 // look_at is where the camera is pointing to (note: it is a point, rather than a direction)
-// v_up is an "up" vector for the camera. look_from and look_at only specify 
+// v_up is an "up" vector for the camera. look_from and look_at only specify
 // the camera within a rotation (think of tilting your head while fixing your gaze)
 fn build_camera(
     look_from: Point3,
     look_at: Point3,
     v_up: Vec3,
-    vertical_field_of_view: f32, aspect_ratio: f32, 
+    vertical_field_of_view: f32,
+    aspect_ratio: f32,
     aperture: f32,
     focus_dist: f32,
 ) -> Camera {
     let theta = degrees_to_radians(vertical_field_of_view);
-    let h = (theta/2.0).tan();
+    let h = (theta / 2.0).tan();
     let viewport_height = 2.0 * h;
     let viewport_width = aspect_ratio * viewport_height;
 
-    // We're going to build a basis for the vector space. 
-    // w is s.t. -w is the camera angle. 
+    // We're going to build a basis for the vector space.
+    // w is s.t. -w is the camera angle.
     let w = look_from.subtract(&look_at).unit_vector();
     let u = cross(v_up, w);
     let v = cross(w, u);
-
 
     // let viewport_height = 2.0;
     // let aspect_ratio = 16.0 / 9.0;
@@ -570,7 +806,9 @@ fn build_camera(
     let vertical = v.multiply(viewport_height).multiply(focus_dist);
 
     let half_plane = horizontal.multiply(0.5).add(&vertical.multiply(0.5));
-    let lower_left_corner = origin.subtract(&half_plane).subtract(&&w.multiply(focus_dist));
+    let lower_left_corner = origin
+        .subtract(&half_plane)
+        .subtract(&&w.multiply(focus_dist));
 
     let lens_radius = aperture / 2.0;
 
@@ -585,13 +823,15 @@ fn build_camera(
         vertical,
         lower_left_corner,
 
-        u, v, w,
+        u,
+        v,
+        w,
         lens_radius,
     };
 }
 
 fn degrees_to_radians(degrees: f32) -> f32 {
-    return degrees *  std::f32::consts::PI/180.0;
+    return degrees * std::f32::consts::PI / 180.0;
 }
 
 fn clamp(x: f32, min: f32, max: f32) -> f32 {
@@ -635,7 +875,7 @@ fn fake_random_unit(seed: f32) -> f32 {
 
 fn random_unit() -> f32 {
     let mut rng = rand::thread_rng();
-    return  rng.gen_range(0.0..1.0);
+    return rng.gen_range(0.0..1.0);
 }
 
 fn random_vec3() -> Vec3 {
@@ -651,7 +891,11 @@ fn random_vec3() -> Vec3 {
 fn random_in_unit_disk() -> Vec3 {
     loop {
         let p = random_vec3();
-        let q = Vec3{x: p.x, y: p.y, z: 0.0};
+        let q = Vec3 {
+            x: p.x,
+            y: p.y,
+            z: 0.0,
+        };
         if q.length_squared() >= 1.0 {
             continue;
         }
@@ -681,10 +925,9 @@ enum Material {
 }
 
 impl Material {
-    fn scatter(&self,ray_in : Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+    fn scatter(&self, ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
         match *self {
-            Material::Lambertian(lamberian) =>
-            lamberian.scatter(ray_in, hit_record),
+            Material::Lambertian(lamberian) => lamberian.scatter(ray_in, hit_record),
             Material::Metal(metal) => metal.scatter(ray_in, hit_record),
             Material::Dielectric(dielectric) => dielectric.scatter(ray_in, hit_record),
         }
@@ -697,30 +940,32 @@ impl Material {
 
 #[derive(Clone, Copy)]
 struct Lambertian {
-    albedo: Colour ,
+    albedo: Colour,
 }
 
 // impl Material for Lambertian {
 impl Lambertian {
-    fn scatter(&self, ray_in : Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
-        let mut scatter_direction = hit_record.normal.add(&random_unit_vector()) ;
+    fn scatter(&self, ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+        let mut scatter_direction = hit_record.normal.add(&random_unit_vector());
         if scatter_direction.near_zero() {
             scatter_direction = hit_record.normal;
         }
 
-        let scattered_ray = Ray{origin: hit_record.p, direction: scatter_direction};
-        
+        let scattered_ray = Ray {
+            origin: hit_record.p,
+            direction: scatter_direction,
+        };
+
         return Some((scattered_ray, self.albedo));
     }
-    
 }
 
-// I didn't really follow the whole derivation of this. 
+// I didn't really follow the whole derivation of this.
 // See section 10.2
 fn refract(uv: Vec3, normal: Vec3, eta_over_eta_prime: f32) -> Vec3 {
-    let cos_theta = f32::min(dot(uv.multiply(-1.0), normal) ,1.0);
+    let cos_theta = f32::min(dot(uv.multiply(-1.0), normal), 1.0);
     let cos_theta_n = normal.multiply(cos_theta);
-    let r_out_perp =  cos_theta_n.add(&uv).multiply(eta_over_eta_prime);
+    let r_out_perp = cos_theta_n.add(&uv).multiply(eta_over_eta_prime);
     let multiplier = (1.0 - r_out_perp.length_squared()).sqrt();
     let r_out_parallel = normal.multiply(-1.0 * multiplier);
     return r_out_perp.add(&r_out_parallel);
@@ -728,63 +973,74 @@ fn refract(uv: Vec3, normal: Vec3, eta_over_eta_prime: f32) -> Vec3 {
 
 #[derive(Clone, Copy)]
 struct Metal {
-    albedo: Colour ,
+    albedo: Colour,
     fuzz: f32,
 }
 
 // impl Material for Metal {
 impl Metal {
-    fn scatter(&self, ray_in : Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
-       let reflected = reflect(ray_in.direction,hit_record.normal); 
-       let noise = &random_in_unit_sphere().multiply(self.fuzz);
-       let scattered_ray = Ray{origin: hit_record.p, direction: reflected.add(noise)};
+    fn scatter(&self, ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+        let reflected = reflect(ray_in.direction, hit_record.normal);
+        let noise = &random_in_unit_sphere().multiply(self.fuzz);
+        let scattered_ray = Ray {
+            origin: hit_record.p,
+            direction: reflected.add(noise),
+        };
 
-       // Hmm, how could this happen? I think maybe if the ray hit the inside
-       // of the surface.
-       if dot(scattered_ray.direction, hit_record.normal) < 0.0 {
-           return None;
-       }
-       return Some((scattered_ray, self.albedo));
+        // Hmm, how could this happen? I think maybe if the ray hit the inside
+        // of the surface.
+        if dot(scattered_ray.direction, hit_record.normal) < 0.0 {
+            return None;
+        }
+        return Some((scattered_ray, self.albedo));
     }
 }
 
 #[derive(Clone, Copy)]
 struct Dielectric {
-    index_of_refraction: f32, 
+    index_of_refraction: f32,
 }
-impl  Dielectric  {
-    fn scatter(&self, ray_in : Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
-        let attenuation = Colour{x: 1.0, y: 1.0, z: 1.0};
-        let refraction_ratio = if hit_record.is_front_face { 1.0/self.index_of_refraction } else { self.index_of_refraction} ;
+impl Dielectric {
+    fn scatter(&self, ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+        let attenuation = Colour {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        };
+        let refraction_ratio = if hit_record.is_front_face {
+            1.0 / self.index_of_refraction
+        } else {
+            self.index_of_refraction
+        };
 
         let unit_direction = ray_in.direction.unit_vector();
 
-        let cos_theta = f32::min(
-            dot(unit_direction.multiply(-1.0), hit_record.normal),
-             1.0);
-        let sin_theta = (1.0 - cos_theta*cos_theta).sqrt();
+        let cos_theta = f32::min(dot(unit_direction.multiply(-1.0), hit_record.normal), 1.0);
+        let sin_theta = (1.0 - cos_theta * cos_theta).sqrt();
         let cannot_refract = (refraction_ratio * sin_theta) > 1.0;
 
-        let direction = if cannot_refract || reflectance(cos_theta, refraction_ratio) > random_unit() {
-            reflect(unit_direction, hit_record.normal)
-        } else {
-        refract(unit_direction, hit_record.normal, refraction_ratio)
+        let direction =
+            if cannot_refract || reflectance(cos_theta, refraction_ratio) > random_unit() {
+                reflect(unit_direction, hit_record.normal)
+            } else {
+                refract(unit_direction, hit_record.normal, refraction_ratio)
+            };
+
+        let scattered_ray = Ray {
+            origin: hit_record.p,
+            direction,
         };
 
-        let scattered_ray = Ray{origin:hit_record.p, direction};
-
-       return Some((scattered_ray, attenuation));
+        return Some((scattered_ray, attenuation));
     }
-
 }
 
-    // Schlick's approximation for reflectance - this wasn't even explained!
+// Schlick's approximation for reflectance - this wasn't even explained!
 fn reflectance(cosine: f32, refraction_ratio: f32) -> f32 {
-        let r0 = (1.0 - refraction_ratio)/(1.0 + refraction_ratio);
-        let r0_squared = r0 * r0;
-        return r0_squared + (1.0 - r0) * (1.0 - cosine).powi(5);
+    let r0 = (1.0 - refraction_ratio) / (1.0 + refraction_ratio);
+    let r0_squared = r0 * r0;
+    return r0_squared + (1.0 - r0) * (1.0 - cosine).powi(5);
 }
-
 
 // Get the reflection off vector after hitting a surface with unit normal
 // surface_normal.
@@ -792,11 +1048,10 @@ fn reflectance(cosine: f32, refraction_ratio: f32) -> f32 {
 fn reflect(incoming_ray: Vec3, surface_normal: Vec3) -> Vec3 {
     let length_of_b = dot(incoming_ray, surface_normal);
 
-    // Don't really understand the signs of 
+    // Don't really understand the signs of
     // In the diagram the reflection is v + 2B
     // from whence v - 2B?
     // Oh, likely explanation: The dot product gives us a negative value for
     // the length of B. We could alternatively take abs value of this.
     return incoming_ray.subtract(&surface_normal.multiply(2.0 * length_of_b));
-
 }
