@@ -1,11 +1,12 @@
 use rand::Rng;
 use rayon::iter::Fold;
-use std::ops;
-use std::f32::consts;
-use std::fs;
-use std::iter;
-use std::ops::Rem;
 use rayon::prelude::*;
+use std::cmp::Ordering;
+use std::f32::consts;
+
+use std::iter;
+use std::ops;
+use std::ops::Rem;
 
 const MAX_T: f32 = 20000.0;
 
@@ -49,7 +50,7 @@ fn main() {
     // let material_left = Lambertian{albedo:Colour{x: 0.0, y:0.0, z:1.0}};
     // let material_right = Lambertian{albedo:Colour{x: 1.0, y:0.0, z:0.0}};
 
-    // let mut world_list: Vec<Box<dyn HittableObject>> = Vec::new();
+    // let mut world_list: Vec<Box<HittableObject>> = Vec::new();
     // world_list.push(Box::new(Sphere {
     //     centre: Vec3 {
     //         x: 0.0,
@@ -107,10 +108,12 @@ fn main() {
     //     material: Material::Lambertian(material_right),
     // }));
 
-    let build_spheres = many_spheres();
-    let world = HittableList {
-        objects: &build_spheres,
-    };
+    let mut build_spheres = many_spheres();
+    // let world = HittableList {
+    //     objects: &build_spheres,
+    // };
+    let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
+    let boxed_world = HittableObject::BVH(world_bvh);
 
     // let world = HittableList {
     //     objects: &world_list,
@@ -160,20 +163,22 @@ fn main() {
             //     z: 0.0,
             // };
 
-            let aggregated_pixel = (0..samples_per_pixel).into_par_iter().map(|sample| {
-                let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
-                let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
-                let ray = camera.get_ray(u, v);
-                return ray_colour(
-                    ray,
-                    &world,
-                    max_depth,
-                    fake_random(sample, false) * 100.0,
-                )
-            }
-            ).reduce(|| Colour{x:0.0,y:0.0,z:0.0},
-                |accum, color| accum.add(&color));
-
+            let aggregated_pixel = (0..samples_per_pixel)
+                .into_par_iter()
+                .map(|sample| {
+                    let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
+                    let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
+                    let ray = camera.get_ray(u, v);
+                    return ray_colour(ray, &boxed_world, max_depth, fake_random(sample, false) * 100.0);
+                })
+                .reduce(
+                    || Colour {
+                        x: 0.0,
+                        y: 0.0,
+                        z: 0.0,
+                    },
+                    |accum, color| accum.add(&color),
+                );
 
             // for sample in 0..samples_per_pixel {
             //     let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
@@ -191,7 +196,7 @@ fn main() {
     }
 }
 
-fn many_spheres() -> Vec<Box<dyn HittableObject>> {
+fn many_spheres() -> Vec<HittableObject<'static>> {
     let material_ground = Lambertian {
         albedo: Colour {
             x: 0.5,
@@ -214,9 +219,9 @@ fn many_spheres() -> Vec<Box<dyn HittableObject>> {
     // let material_left = Lambertian{albedo:Colour{x: 0.0, y:0.0, z:1.0}};
     // let material_right = Lambertian{albedo:Colour{x: 1.0, y:0.0, z:0.0}};
 
-    let mut world_list: Vec<Box<dyn HittableObject>> = Vec::new();
+    let mut world_list: Vec<HittableObject> = Vec::new();
     // Add "ground" sphere.
-    world_list.push(Box::new(Sphere {
+    world_list.push(HittableObject::Sphere(Sphere {
         centre: Vec3 {
             x: 0.0,
             y: -1000.0,
@@ -246,21 +251,21 @@ fn many_spheres() -> Vec<Box<dyn HittableObject>> {
             if centre.subtract(&threshold_point).length() > 0.9 {
                 if noise < 0.8 {
                     // Diffuse material
-                    world_list.push(Box::new(Sphere {
+                    world_list.push(HittableObject::Sphere(Sphere {
                         centre: centre,
                         radius: 0.2,
                         material: Material::Lambertian(random_lambertian()),
                     }));
                 } else if noise < 0.95 {
                     // Metal
-                    world_list.push(Box::new(Sphere {
+                    world_list.push(HittableObject::Sphere(Sphere {
                         centre: centre,
                         radius: 0.2,
                         material: Material::Metal(random_metal()),
                     }));
                 } else {
                     //glass
-                    world_list.push(Box::new(Sphere {
+                    world_list.push(HittableObject::Sphere(Sphere {
                         centre: centre,
                         radius: 0.2,
                         material: Material::Dielectric(material_glass),
@@ -270,7 +275,7 @@ fn many_spheres() -> Vec<Box<dyn HittableObject>> {
         }
     }
 
-    world_list.push(Box::new(Sphere {
+    world_list.push(HittableObject::Sphere(Sphere {
         centre: Vec3 {
             x: 0.0,
             y: 1.0,
@@ -279,7 +284,7 @@ fn many_spheres() -> Vec<Box<dyn HittableObject>> {
         radius: 1.0,
         material: Material::Dielectric(material_glass),
     }));
-    world_list.push(Box::new(Sphere {
+    world_list.push(HittableObject::Sphere(Sphere {
         centre: Vec3 {
             x: -4.0,
             y: 1.0,
@@ -296,8 +301,12 @@ fn many_spheres() -> Vec<Box<dyn HittableObject>> {
         },
         fuzz: 0.0,
     };
-    world_list.push(Box::new(Sphere {
-        centre: Vec3 { x: 4.0, y: 1.0, z: 0.0 },
+    world_list.push(HittableObject::Sphere(Sphere {
+        centre: Vec3 {
+            x: 4.0,
+            y: 1.0,
+            z: 0.0,
+        },
         radius: 1.0,
         material: Material::Metal(material_metal),
     }));
@@ -442,7 +451,7 @@ fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
 // The chose colour is to take the unit normal and use it's parameters as colours.
 // TODO the seed is only needed because I'm using my pseudorandom function. Can be deleted when
 // I use real random.
-fn ray_colour(ray: Ray, world: &HittableList, depth: i32, seed: f32) -> Colour {
+fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, seed: f32) -> Colour {
     if depth <= 0 {
         return Colour {
             x: 0.0,
@@ -526,7 +535,7 @@ struct Vec3 {
 //     }
 
 //     type Output = Vec3;
-    
+
 // }
 
 impl Vec3 {
@@ -640,6 +649,7 @@ fn hit_record_with_norml<'a>(
     };
 }
 
+#[derive(Clone, Copy)]
 struct HitRecord {
     // P is the point of hitting
     p: Point3,
@@ -662,12 +672,13 @@ impl HitRecord {
     }
 }
 
-#[derive()]
+#[derive(Clone, Copy)]
 struct HittableList<'a> {
-    objects: &'a Vec<Box<dyn HittableObject>>,
+    objects: &'a Vec<HittableObject<'a>>,
 }
 
-impl HittableObject for HittableList<'_> {
+impl HittableList<'_> {
+// impl HittableObject for HittableList<'_> {
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let mut temp_record = None;
         let mut hit_anything = false;
@@ -686,19 +697,53 @@ impl HittableObject for HittableList<'_> {
         }
         return temp_record;
     }
+
+    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+
+        let maybe_boxes = self
+            .objects
+            .into_iter()
+            .map(|obj| obj.bounding_box(time0, time1));
+        let boxes_if_zero_nones = maybe_boxes.collect::<Option<Vec<BoundingBox>>>()?;
+        return boxes_if_zero_nones
+                    .into_iter()
+                    .reduce(|box1, box2| surrounding_box(&box1, &box2))
+            
+        
+    }
 }
 
-trait HittableObject : Sync {
-    fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord>;
+fn surrounding_box(box_0: &BoundingBox, box_1: &BoundingBox) -> BoundingBox {
+    let small = Point3 {
+        x: box_0.minimum.x.min(box_1.minimum.x),
+        y: box_0.minimum.y.min(box_1.minimum.y),
+        z: box_0.minimum.z.min(box_1.minimum.z),
+    };
+    let large = Point3 {
+        x: box_0.maximum.x.max(box_1.maximum.x),
+        y: box_0.maximum.y.max(box_1.maximum.y),
+        z: box_0.maximum.z.max(box_1.maximum.z),
+    };
+    return BoundingBox {
+        minimum: small,
+        maximum: large,
+    };
 }
 
+// trait HittableObject: Sync + Clone {
+//     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord>;
+//     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox>;
+// }
+
+#[derive(Clone, Copy)]
 struct Sphere {
     centre: Point3,
     radius: f32,
     material: Material,
 }
 
-impl HittableObject for Sphere {
+impl Sphere {
+// impl HittableObject for Sphere {
     /// See code on hit_sphere for logic and and quadratic optimisation
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let origin_centre = ray.origin.subtract(&self.centre);
@@ -732,6 +777,19 @@ impl HittableObject for Sphere {
             ray,
             outward_normal,
         ));
+    }
+
+    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+        let radius_box = Vec3 {
+            x: self.radius,
+            y: self.radius,
+            z: self.radius,
+        };
+        let output = BoundingBox {
+            minimum: self.centre.subtract(&radius_box),
+            maximum: self.centre.add(&radius_box),
+        };
+        return Some(output);
     }
 }
 
@@ -1054,4 +1112,233 @@ fn reflect(incoming_ray: Vec3, surface_normal: Vec3) -> Vec3 {
     // Oh, likely explanation: The dot product gives us a negative value for
     // the length of B. We could alternatively take abs value of this.
     return incoming_ray.subtract(&surface_normal.multiply(2.0 * length_of_b));
+}
+
+#[derive(Clone, Copy)]
+struct BoundingBox {
+    minimum: Point3,
+    maximum: Point3,
+}
+
+/// Core Idea:
+/// Rays are given as a function of time, P(t) = Origin + direction*t
+/// Given an interval (x_0, x_1) on a single dimension, you can find the time
+/// interval that the ray crosses that interval.
+/// E.g. Origin_x + direction_x*t_0 = x_0 can be solved for x_0 as
+///
+/// t_0 = (x_0 - Origin_x) / direction_x.
+///
+/// And likewise solving for t_1, the exit time.
+///
+/// This gives an interval (t0, t1) for the intersection on one axis.
+/// Taking the intersection of these intervals on 3 axis will give you
+/// the interval the box is hit (if any).
+// impl HittableObject for BoundingBox {
+//     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
+//         let mut min_so_far: f32 = t_min;
+//         let mut max_so_far: f32 = t_max;
+
+//         // todo divisions by zero
+//         let x_interval = self.x_hit_interval(ray);
+//         let y_interval = self.y_hit_interval(ray);
+//         let z_interval = self.z_hit_interval(ray);
+
+//         let min = x_interval.0.min(y_interval.0.min(z_interval.0));
+//         let max = x_interval.1.max(y_interval.1.max(z_interval.1));
+
+//         return min < max;
+
+//     }
+
+// }
+
+impl BoundingBox {
+    fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> bool {
+        // todo divisions by zero
+        let x_interval = self.x_hit_interval(ray);
+        let y_interval = self.y_hit_interval(ray);
+        let z_interval = self.z_hit_interval(ray);
+
+        let min = x_interval.0.min(y_interval.0.min(z_interval.0));
+        let max = x_interval.1.max(y_interval.1.max(z_interval.1));
+
+        return min < max;
+    }
+    fn x_hit_interval(&self, ray: &Ray) -> (f32, f32) {
+        let x_hit_1 = (self.minimum.x - ray.origin.x) / ray.direction.x;
+        let x_hit_2 = (self.maximum.x - ray.origin.x) / ray.direction.x;
+        if x_hit_1 > x_hit_2 {
+            return (x_hit_2, x_hit_1);
+        } else {
+            return (x_hit_1, x_hit_2);
+        }
+    }
+
+    fn y_hit_interval(&self, ray: &Ray) -> (f32, f32) {
+        let y_hit_1 = (self.minimum.y - ray.origin.y) / ray.direction.y;
+        let y_hit_2 = (self.maximum.y - ray.origin.y) / ray.direction.y;
+        if y_hit_1 > y_hit_2 {
+            return (y_hit_2, y_hit_1);
+        } else {
+            return (y_hit_1, y_hit_2);
+        }
+    }
+
+    fn z_hit_interval(&self, ray: &Ray) -> (f32, f32) {
+        let z_hit_1 = (self.minimum.z - ray.origin.z) / ray.direction.z;
+        let z_hit_2 = (self.maximum.z - ray.origin.z) / ray.direction.z;
+        if z_hit_1 > z_hit_2 {
+            return (z_hit_2, z_hit_1);
+        } else {
+            return (z_hit_1, z_hit_2);
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BVH<'a> {
+    left: Box<HittableObject<'a>> ,
+    right: Box<HittableObject<'a>>,
+    bounding_box: BoundingBox,
+}
+
+#[derive(Clone)]
+enum HittableObject<'a> {
+    Sphere(Sphere),
+    HittableList(HittableList<'a>),
+    BVH(BVH<'a>),
+}
+
+impl<'a> HittableObject<'a> {
+
+    fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
+        match self {
+            HittableObject::Sphere(sphere) => sphere.hit(ray, t_min, t_max),
+            HittableObject::BVH(bvh) => bvh.hit(ray, t_min, t_max),
+            HittableObject::HittableList(hittableList) => hittableList.hit(ray, t_min, t_max),
+            
+        }
+    }
+    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+        match self {
+            HittableObject::Sphere(sphere) => sphere.bounding_box(time0, time1),
+            HittableObject::BVH(bvh) => bvh.bounding_box(time0, time1),
+            HittableObject::HittableList(hittableList) => hittableList.bounding_box(time0, time1),
+        }
+    }
+}
+
+
+impl<'a> BVH<'a> {
+    
+    fn build_bvh(objects: &'a mut [ HittableObject ], time0: f32, time1: f32) -> BVH<'a> {
+    let comparator = get_random_axis_comparator();
+    let left: HittableObject;
+    let right: HittableObject;
+
+    let object_span = objects.len();
+    if object_span == 1 {
+        left = objects[0].clone();
+        right = objects[0].clone();
+    } else if object_span == 2 {
+        if comparator(&&objects[0], &&objects[1]) == Ordering::Less {
+            left = objects[0].clone();
+            right = objects[1].clone();
+        } else {
+            left = objects[1].clone();
+            right = objects[0].clone();
+        }
+    } else {
+        objects.sort_by(comparator);
+        let (new_head, new_tail) = objects.split_at_mut(objects.len()/2);
+        left = HittableObject::BVH( BVH::build_bvh(new_head, time0, time1));
+        right = HittableObject::BVH(BVH::build_bvh(new_tail, time0, time1));
+
+    }
+
+    let left_bb = left.bounding_box(time0, time1);
+    let right_bb = right.bounding_box(time0, time1);
+    if left_bb.is_none() || right_bb.is_none() {
+        unreachable!("Can't construct a BVH if the objects aren't bounded!");
+    }
+    let left_box = Box::new(left);
+    let right_box = Box::new(right);
+
+    return BVH {
+        left: left_box,
+        right: right_box,
+        bounding_box: surrounding_box(&left_bb.unwrap(), &right_bb.unwrap()),
+    };
+}
+}
+
+fn get_random_axis_comparator() -> fn(&HittableObject, &HittableObject) -> Ordering
+{
+
+    let noise: i32 = rand::random();
+    if noise % 3 == 0 {
+
+    return box_compare_x;
+    } else if noise % 3 == 1 {
+    return box_compare_y;
+    } else  {
+        return box_compare_z;
+    }
+}
+
+fn box_compare_x(box0: &HittableObject, box1: &HittableObject) -> Ordering {
+    return box_compare(box0, box1, 0);
+}
+fn box_compare_y(box0: &HittableObject, box1: &HittableObject) -> Ordering {
+    return box_compare(box0, box1, 1);
+}
+fn box_compare_z(box0: &HittableObject, box1: &HittableObject) -> Ordering {
+    return box_compare(box0, box1, 2);
+}
+
+fn box_compare(
+    box0: &HittableObject,
+    box1: &HittableObject,
+    axis: i32,
+) -> Ordering {
+    let box_a = box0.bounding_box(0.0, 0.0).unwrap();
+    let box_b = box1.bounding_box(0.0, 0.0).unwrap();
+    if axis == 0 {
+        return if box_a.minimum.x < box_b.minimum.x {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        };
+    } else if axis == 1 {
+        return if box_a.minimum.y < box_b.minimum.y {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        };
+    } else if axis == 2 {
+        return if box_a.minimum.z < box_b.minimum.z {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        };
+    } else {
+        unreachable!()
+    }
+}
+
+impl BVH<'_> {
+    fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
+        if !self.bounding_box.hit(ray, t_min, t_max) {
+            return None;
+        }
+        let hit_left = self.left.hit(ray, t_min, t_max);
+        match hit_left {
+            None => return self.right.hit(ray, t_min, t_max),
+            Some(hit_on_left) => return self.right.hit(ray, t_min, hit_on_left.t).or(hit_left),
+        }
+    }
+
+    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+        return Some(self.bounding_box);
+    }
 }
