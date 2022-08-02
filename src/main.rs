@@ -47,77 +47,11 @@ fn main() {
         fuzz: 1.0,
     };
 
-    // let material_left = Lambertian{albedo:Colour{x: 0.0, y:0.0, z:1.0}};
-    // let material_right = Lambertian{albedo:Colour{x: 1.0, y:0.0, z:0.0}};
-
-    // let mut world_list: Vec<Box<HittableObject>> = Vec::new();
-    // world_list.push(Box::new(Sphere {
-    //     centre: Vec3 {
-    //         x: 0.0,
-    //         y: -100.5,
-    //         z: -1.0,
-    //     },
-    //     radius: 100.0,
-    //     material: Material::Lambertian(material_ground),
-    // }));
-    // world_list.push(Box::new(Sphere {
-    //     centre: Vec3 {
-    //         x: 0.0,
-    //         y: 0.0,
-    //         z: -1.0,
-    //     },
-    //     radius: 0.5,
-    //     material: Material::Lambertian(material_centre),
-    // }));
-    // world_list.push(Box::new(Sphere {
-    //     centre: Vec3 {
-    //         x: -1.0,
-    //         y: 0.0,
-    //         z: -1.0,
-    //     },
-    //     radius: 0.5,
-    //     material: Material::Dielectric(material_left),
-    // }));
-    // world_list.push(Box::new(Sphere {
-    //     centre: Vec3 {
-    //         x: -1.0,
-    //         y: 0.0,
-    //         z: -1.0,
-    //     },
-    //     radius: -0.4,
-    //     material: Material::Dielectric(material_left),
-    // }));
-    // world_list.push(Box::new(Sphere {
-    //     centre: Vec3 {
-    //         x: 1.0,
-    //         y: 0.0,
-    //         z: -1.0,
-    //     },
-    //     radius: 0.5,
-    //     material: Material::Metal(material_right),
-    // }));
-
-    // world_list.push(Box::new(Sphere {
-    //     centre: Vec3 { x: -r, y: 0.0, z: -1.0 },
-    //     radius: r,
-    //     material: Material::Lambertian(material_left),
-    // }));
-    // world_list.push(Box::new(Sphere {
-    //     centre: Vec3 { x: r, y: 0.0, z: -1.0 },
-    //     radius: r,
-    //     material: Material::Lambertian(material_right),
-    // }));
 
     let mut build_spheres = many_spheres();
-    // let world = HittableList {
-    //     objects: &build_spheres,
-    // };
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
 
-    // let world = HittableList {
-    //     objects: &world_list,
-    // };
 
     let look_from = Point3 {
         x: 13.0,
@@ -355,39 +289,6 @@ fn random_metal() -> Metal {
 //     return white.multiply(1.0 - t).add(&colour2.multiply(t));
 // }
 
-// fn write_data() -> String {
-
-//     let mut header: Vec<String> = vec!["P3".to_string(),
-//     "255".to_string(), // width
-//     "200".to_string(), // height
-//     "255".to_string(), //max value for each colour
-//     ];
-
-//     header.append(&mut write_lines(200));
-//     return header.join("\n")
-// }
-
-// fn write_lines(height: usize) -> Vec<String> {
-//     return iter::repeat(write_line(255, 128)).take(height).collect::<Vec<String>>();
-
-// }
-
-// fn write_line(width: usize, green: usize) -> String {
-//     return (0..width).map(|x| write_pixel(x, green, 64)).collect::<Vec<String>>().join(" ");
-//     // return iter::repeat(write_pixel(125, green, 64)).take(length).collect::<Vec<String>>().join(" ");
-// }
-
-// original, without antialiasing
-// fn write_pixel(colour: Colour) {
-//     let out = [
-//         colour.x_for_printing(),
-//         colour.y_for_printing(),
-//         colour.z_for_printing(),
-//     ]
-//     .join(" ");
-//     println!("{}", out);
-// }
-
 fn write_pixel(colour: Colour, samples_per_pixel: i32) {
     let scale = 1.0 / (samples_per_pixel as f32);
     // Sqrt for gamma correction.
@@ -483,20 +384,6 @@ fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, seed: f32) -> Colour
                     }
                 }
             }
-
-            // // This is where the reflection bounces to, featuring a random variation.
-            // let target = hit_record.p
-            //     .add(&hit_record.normal)
-            //     .add(&random_unit_vector());
-
-            // let reflected_ray = Ray {
-            //     origin: hit_record.p,
-            //     //
-            //     direction: target.subtract(&hit_record.p),
-            // };
-            // let colour_at_target = ray_colour(reflected_ray, world, depth - 1, seed + 1.0);
-
-            // return colour_at_target.multiply(0.5);
         }
 
         None => {
@@ -730,11 +617,6 @@ fn surrounding_box(box_0: &BoundingBox, box_1: &BoundingBox) -> BoundingBox {
     };
 }
 
-// trait HittableObject: Sync + Clone {
-//     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord>;
-//     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox>;
-// }
-
 #[derive(Clone, Copy)]
 struct Sphere {
     centre: Point3,
@@ -743,7 +625,6 @@ struct Sphere {
 }
 
 impl Sphere {
-// impl HittableObject for Sphere {
     /// See code on hit_sphere for logic and and quadratic optimisation
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let origin_centre = ray.origin.subtract(&self.centre);
