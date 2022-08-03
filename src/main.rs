@@ -47,11 +47,9 @@ fn main() {
         fuzz: 1.0,
     };
 
-
     let mut build_spheres = many_spheres();
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
-
 
     let look_from = Point3 {
         x: 13.0,
@@ -103,7 +101,12 @@ fn main() {
                     let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
                     let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
                     let ray = camera.get_ray(u, v);
-                    return ray_colour(ray, &boxed_world, max_depth, fake_random(sample, false) * 100.0);
+                    return ray_colour(
+                        ray,
+                        &boxed_world,
+                        max_depth,
+                        fake_random(sample, false) * 100.0,
+                    );
                 })
                 .reduce(
                     || Colour {
@@ -352,7 +355,7 @@ fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
 // The chose colour is to take the unit normal and use it's parameters as colours.
 // TODO the seed is only needed because I'm using my pseudorandom function. Can be deleted when
 // I use real random.
-fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, seed: f32) -> Colour {
+fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, background: Colour) -> Colour {
     if depth <= 0 {
         return Colour {
             x: 0.0,
@@ -362,46 +365,31 @@ fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, seed: f32) -> Colour
     }
 
     let maybe_hit_record = world.hit(&ray, 0.001, MAX_T);
-    match maybe_hit_record {
-        Some(hit_record) => {
-            let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
-            match maybe_reflection {
-                //todo rename colour to attenutation when i understand what that is.
-                Some((reflected_ray, surface_colour)) => {
-                    let reflection_colour = ray_colour(reflected_ray, world, depth - 1, seed);
-                    return Colour {
-                        x: surface_colour.x * reflection_colour.x,
-                        y: surface_colour.y * reflection_colour.y,
-                        z: surface_colour.z * reflection_colour.z,
-                    };
-                }
+    if maybe_hit_record.is_none() {
+        return background;
+    }
+    let hit_record = maybe_hit_record.unwrap();
 
-                None => {
-                    return Colour {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                    }
-                }
-            }
+    let emitted = hit_record.material.emitted(u, v, point);
+
+    let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
+    match maybe_reflection {
+        //todo rename colour to attenutation when i understand what that is.
+        Some((reflected_ray, surface_colour)) => {
+            let reflection_colour = ray_colour(reflected_ray, world, depth - 1, background);
+            return Colour {
+                x: surface_colour.x * reflection_colour.x,
+                y: surface_colour.y * reflection_colour.y,
+                z: surface_colour.z * reflection_colour.z,
+            };
         }
 
         None => {
-            //see other ray colour function
-            let unit_direction = ray.direction.unit_vector();
-            let t = 0.5 * (unit_direction.y + 1.0);
-            let white = Colour {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-            };
-            let colour2 = Colour {
-                x: 0.5,
-                y: 0.7,
-                z: 1.0,
-            };
-
-            return white.multiply(1.0 - t).add(&colour2.multiply(t));
+            return Colour {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            }
         }
     }
 }
@@ -565,7 +553,7 @@ struct HittableList<'a> {
 }
 
 impl HittableList<'_> {
-// impl HittableObject for HittableList<'_> {
+    // impl HittableObject for HittableList<'_> {
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let mut temp_record = None;
         let mut hit_anything = false;
@@ -586,17 +574,14 @@ impl HittableList<'_> {
     }
 
     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
-
         let maybe_boxes = self
             .objects
             .into_iter()
             .map(|obj| obj.bounding_box(time0, time1));
         let boxes_if_zero_nones = maybe_boxes.collect::<Option<Vec<BoundingBox>>>()?;
         return boxes_if_zero_nones
-                    .into_iter()
-                    .reduce(|box1, box2| surrounding_box(&box1, &box2))
-            
-        
+            .into_iter()
+            .reduce(|box1, box2| surrounding_box(&box1, &box2));
     }
 }
 
@@ -861,6 +846,7 @@ enum Material {
     Lambertian(Lambertian),
     Metal(Metal),
     Dielectric(Dielectric),
+    DiffuseLight(DiffuseLight),
 }
 
 impl Material {
@@ -869,6 +855,20 @@ impl Material {
             Material::Lambertian(lamberian) => lamberian.scatter(ray_in, hit_record),
             Material::Metal(metal) => metal.scatter(ray_in, hit_record),
             Material::Dielectric(dielectric) => dielectric.scatter(ray_in, hit_record),
+            Material::DiffuseLight(diffuseLight) => diffuseLight.scatter(ray_in, hit_record),
+        }
+    }
+
+    fn emitted(&self, u: f32, v: f32, point: &Point3) -> Colour {
+        match *self {
+            Material::DiffuseLight(diffuseLight) => diffuseLight.emitted(u, v, point),
+            _ => {
+                return Colour {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }
+            }
         }
     }
 }
@@ -896,6 +896,20 @@ impl Lambertian {
         };
 
         return Some((scattered_ray, self.albedo));
+    }
+}
+
+#[derive(Clone, Copy)]
+struct DiffuseLight {
+    colour: Colour,
+}
+impl DiffuseLight {
+    fn scatter(&self, _ray_in: Ray, _hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+        return None;
+    }
+
+    fn emitted(&self, u: f32, v: f32, point: &Point3) -> Colour {
+        return self.colour;
     }
 }
 
@@ -1078,7 +1092,7 @@ impl BoundingBox {
 
 #[derive(Clone)]
 struct BVH<'a> {
-    left: Box<HittableObject<'a>> ,
+    left: Box<HittableObject<'a>>,
     right: Box<HittableObject<'a>>,
     bounding_box: BoundingBox,
 }
@@ -1091,13 +1105,11 @@ enum HittableObject<'a> {
 }
 
 impl<'a> HittableObject<'a> {
-
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         match self {
             HittableObject::Sphere(sphere) => sphere.hit(ray, t_min, t_max),
             HittableObject::BVH(bvh) => bvh.hit(ray, t_min, t_max),
             HittableObject::HittableList(hittableList) => hittableList.hit(ray, t_min, t_max),
-            
         }
     }
     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
@@ -1109,60 +1121,54 @@ impl<'a> HittableObject<'a> {
     }
 }
 
-
 impl<'a> BVH<'a> {
-    
-    fn build_bvh(objects: &'a mut [ HittableObject ], time0: f32, time1: f32) -> BVH<'a> {
-    let comparator = get_random_axis_comparator();
-    let left: HittableObject;
-    let right: HittableObject;
+    fn build_bvh(objects: &'a mut [HittableObject], time0: f32, time1: f32) -> BVH<'a> {
+        let comparator = get_random_axis_comparator();
+        let left: HittableObject;
+        let right: HittableObject;
 
-    let object_span = objects.len();
-    if object_span == 1 {
-        left = objects[0].clone();
-        right = objects[0].clone();
-    } else if object_span == 2 {
-        if comparator(&&objects[0], &&objects[1]) == Ordering::Less {
+        let object_span = objects.len();
+        if object_span == 1 {
             left = objects[0].clone();
-            right = objects[1].clone();
-        } else {
-            left = objects[1].clone();
             right = objects[0].clone();
+        } else if object_span == 2 {
+            if comparator(&&objects[0], &&objects[1]) == Ordering::Less {
+                left = objects[0].clone();
+                right = objects[1].clone();
+            } else {
+                left = objects[1].clone();
+                right = objects[0].clone();
+            }
+        } else {
+            objects.sort_by(comparator);
+            let (new_head, new_tail) = objects.split_at_mut(objects.len() / 2);
+            left = HittableObject::BVH(BVH::build_bvh(new_head, time0, time1));
+            right = HittableObject::BVH(BVH::build_bvh(new_tail, time0, time1));
         }
-    } else {
-        objects.sort_by(comparator);
-        let (new_head, new_tail) = objects.split_at_mut(objects.len()/2);
-        left = HittableObject::BVH( BVH::build_bvh(new_head, time0, time1));
-        right = HittableObject::BVH(BVH::build_bvh(new_tail, time0, time1));
 
+        let left_bb = left.bounding_box(time0, time1);
+        let right_bb = right.bounding_box(time0, time1);
+        if left_bb.is_none() || right_bb.is_none() {
+            unreachable!("Can't construct a BVH if the objects aren't bounded!");
+        }
+        let left_box = Box::new(left);
+        let right_box = Box::new(right);
+
+        return BVH {
+            left: left_box,
+            right: right_box,
+            bounding_box: surrounding_box(&left_bb.unwrap(), &right_bb.unwrap()),
+        };
     }
-
-    let left_bb = left.bounding_box(time0, time1);
-    let right_bb = right.bounding_box(time0, time1);
-    if left_bb.is_none() || right_bb.is_none() {
-        unreachable!("Can't construct a BVH if the objects aren't bounded!");
-    }
-    let left_box = Box::new(left);
-    let right_box = Box::new(right);
-
-    return BVH {
-        left: left_box,
-        right: right_box,
-        bounding_box: surrounding_box(&left_bb.unwrap(), &right_bb.unwrap()),
-    };
-}
 }
 
-fn get_random_axis_comparator() -> fn(&HittableObject, &HittableObject) -> Ordering
-{
-
+fn get_random_axis_comparator() -> fn(&HittableObject, &HittableObject) -> Ordering {
     let noise: i32 = rand::random();
     if noise % 3 == 0 {
-
-    return box_compare_x;
+        return box_compare_x;
     } else if noise % 3 == 1 {
-    return box_compare_y;
-    } else  {
+        return box_compare_y;
+    } else {
         return box_compare_z;
     }
 }
@@ -1177,11 +1183,7 @@ fn box_compare_z(box0: &HittableObject, box1: &HittableObject) -> Ordering {
     return box_compare(box0, box1, 2);
 }
 
-fn box_compare(
-    box0: &HittableObject,
-    box1: &HittableObject,
-    axis: i32,
-) -> Ordering {
+fn box_compare(box0: &HittableObject, box1: &HittableObject, axis: i32) -> Ordering {
     let box_a = box0.bounding_box(0.0, 0.0).unwrap();
     let box_b = box1.bounding_box(0.0, 0.0).unwrap();
     if axis == 0 {
