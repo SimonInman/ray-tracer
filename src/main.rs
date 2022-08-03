@@ -1,8 +1,10 @@
 pub mod texture;
+pub mod rectangle;
 
 use rand::Rng;
 use rayon::iter::Fold;
 use rayon::prelude::*;
+use rectangle::Rectangle;
 use std::cmp::Ordering;
 use std::f32::consts;
 use texture::CheckerTexture;
@@ -20,18 +22,47 @@ fn main() {
     let r = (std::f32::consts::PI / 4.0).cos();
     // Image
     let aspect_ratio = 3.0 / 2.0;
+    // let image_width = 600;
     let image_width = 1200;
     let image_height: i32 = (image_width as f32 / aspect_ratio) as i32;
     let samples_per_pixel = 50;
     // let samples_per_pixel = 500;
     let max_depth = 50;
 
+    // World
+    // let material_ground = Lambertian {
+    //     albedo: Colour {
+    //         x: 0.8,
+    //         y: 0.8,
+    //         z: 0.0,
+    //     },
+    // };
+    // let material_centre = Lambertian {
+    //     albedo: Colour {
+    //         x: 0.1,
+    //         y: 0.2,
+    //         z: 0.5,
+    //     },
+    // };
+    // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
+    let material_left = Dielectric {
+        index_of_refraction: 1.5,
+    };
+    let material_right = Metal {
+        albedo: Colour {
+            x: 0.8,
+            y: 0.6,
+            z: 0.2,
+        },
+        fuzz: 1.0,
+    };
+
     let mut build_spheres = many_spheres();
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
 
     let look_from = Point3 {
-        x: -13.0,
+        x: 13.0,
         y: 2.0,
         z: 3.0,
     };
@@ -56,6 +87,9 @@ fn main() {
         aperture,
         dist_to_focus,
     );
+    let background = Colour{x: 0.70, y:  0.80,z: 1.00};
+    let black_background = Colour{x: 0.0, y:  0.0,z: 0.00};
+ 
 
     // Render
     println!("P3");
@@ -76,6 +110,7 @@ fn main() {
                         ray,
                         &boxed_world,
                         max_depth,
+                        black_background,
                     );
                 })
                 .reduce(
@@ -93,6 +128,7 @@ fn main() {
 }
 
 fn many_spheres() -> Vec<HittableObject<'static>> {
+    let light = DiffuseLight{colour: Colour{x:4.0, y:4.0, z:4.0}};
     let material_ground = Lambertian::new(Colour {
         x: 0.5,
         y: 0.5,
@@ -208,6 +244,17 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
         radius: 1.0,
         material: Material::Metal(material_metal),
     }));
+
+    world_list.push(HittableObject::Rectangle(Rectangle::new(
+        3.0,
+        5.0,
+        1.0,
+        3.0,
+        2.0,
+        Material::DiffuseLight(light)),
+    ));
+
+
     return world_list;
 }
 
@@ -297,7 +344,7 @@ fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
 // (If you're standing at P on earth, the direction to the centre of the earth is
 // C - P, so the opposite direction is P-C).
 // The chose colour is to take the unit normal and use it's parameters as colours.
-fn ray_colour(ray: Ray, world: &HittableObject, depth: i32) -> Colour {
+fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, background: Colour) -> Colour {
     if depth <= 0 {
         return Colour {
             x: 0.0,
@@ -306,48 +353,30 @@ fn ray_colour(ray: Ray, world: &HittableObject, depth: i32) -> Colour {
         };
     }
 
+    // Did we hit anything?
     let maybe_hit_record = world.hit(&ray, 0.001, MAX_T);
-    match maybe_hit_record {
-        Some(hit_record) => {
-            let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
-            match maybe_reflection {
-                //todo rename colour to attenutation when i understand what that is.
-                Some((reflected_ray, surface_colour)) => {
-                    let reflection_colour = ray_colour(reflected_ray, world, depth - 1);
-                    return Colour {
-                        x: surface_colour.x * reflection_colour.x,
-                        y: surface_colour.y * reflection_colour.y,
-                        z: surface_colour.z * reflection_colour.z,
-                    };
-                }
+    if maybe_hit_record.is_none() {
+        return background;
+    }
+    let hit_record = maybe_hit_record.unwrap();
 
-                None => {
-                    return Colour {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                    }
-                }
-            }
+    let emitted = hit_record.material.emitted(hit_record.u, hit_record.v, &hit_record.p);
+
+    let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
+    match maybe_reflection {
+        //todo rename colour to attenutation when i understand what that is.
+        Some((reflected_ray, surface_colour)) => {
+            let reflection_colour = ray_colour(reflected_ray, world, depth - 1, background);
+
+
+            return emitted.add(&Colour {
+                x: surface_colour.x * reflection_colour.x,
+                y: surface_colour.y * reflection_colour.y,
+                z: surface_colour.z * reflection_colour.z,
+            });
         }
 
-        None => {
-            //see other ray colour function
-            let unit_direction = ray.direction.unit_vector();
-            let t = 0.5 * (unit_direction.y + 1.0);
-            let white = Colour {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-            };
-            let colour2 = Colour {
-                x: 0.5,
-                y: 0.7,
-                z: 1.0,
-            };
-
-            return white.multiply(1.0 - t).add(&colour2.multiply(t));
-        }
+        None => { return emitted; }
     }
 }
 
@@ -403,27 +432,27 @@ impl Vec3 {
     }
 
     //for printing colours only
-    fn x_for_printing(&self) -> String {
-        // return ((255.999 * self.x) as i32).to_string();
-        return self.safe_colour_print(self.x);
-    }
-    fn y_for_printing(&self) -> String {
-        // return ((255.999 * self.y) as i32).to_string();
-        return self.safe_colour_print(self.y);
-    }
-    fn z_for_printing(&self) -> String {
-        // return ((255.999 * self.z) as i32).to_string();
-        return self.safe_colour_print(self.z);
-    }
+    // fn x_for_printing(&self) -> String {
+    //     // return ((255.999 * self.x) as i32).to_string();
+    //     return self.safe_colour_print(self.x);
+    // }
+    // fn y_for_printing(&self) -> String {
+    //     // return ((255.999 * self.y) as i32).to_string();
+    //     return self.safe_colour_print(self.y);
+    // }
+    // fn z_for_printing(&self) -> String {
+    //     // return ((255.999 * self.z) as i32).to_string();
+    //     return self.safe_colour_print(self.z);
+    // }
 
-    // Check that printing is outputing valid integer.
-    // Should be "Static" equivalent, but I'm on a plane and can't look it up.
-    fn safe_colour_print(&self, coord: f32) -> String {
-        let as_i32 = (255.999 * coord) as i32;
-        assert!(as_i32 >= 0, "failed to print because as_i32 is {}", as_i32);
-        assert!(as_i32 < 256, "failed to print because as_i32 is {}", as_i32);
-        return as_i32.to_string();
-    }
+    // // Check that printing is outputing valid integer.
+    // // Should be "Static" equivalent, but I'm on a plane and can't look it up.
+    // fn safe_colour_print(&self, coord: f32) -> String {
+    //     let as_i32 = (255.999 * coord) as i32;
+    //     assert!(as_i32 >= 0, "failed to print because as_i32 is {}", as_i32);
+    //     assert!(as_i32 < 256, "failed to print because as_i32 is {}", as_i32);
+    //     return as_i32.to_string();
+    // }
 
     fn near_zero(&self) -> bool {
         let threshold = 1e-8;
@@ -433,13 +462,13 @@ impl Vec3 {
 
 //todo have this or static method above but not both.
 fn safe_colour_print(coord: f32) -> String {
-    let as_i32 = (255.999 * coord) as i32;
+    let as_i32 = clamp(255.999 * coord, 0.0, 255.0) as i32;
     assert!(as_i32 >= 0, "failed to print because as_i32 is {}", as_i32);
     assert!(as_i32 < 256, "failed to print because as_i32 is {}", as_i32);
     return as_i32.to_string();
 }
 
-struct Ray {
+pub struct Ray {
     origin: Point3,
     direction: Point3,
 }
@@ -477,7 +506,7 @@ fn hit_record_with_norml<'a>(
 }
 
 #[derive(Clone)]
-struct HitRecord {
+pub struct HitRecord {
     // P is the point of hitting
     p: Point3,
     normal: Vec3,
@@ -788,10 +817,11 @@ fn random_unit_vector() -> Vec3 {
 }
 
 #[derive(Clone)]
-enum Material {
+pub enum Material {
     Lambertian(Lambertian),
     Metal(Metal),
     Dielectric(Dielectric),
+    DiffuseLight(DiffuseLight),
 }
 
 impl Material {
@@ -800,6 +830,20 @@ impl Material {
             Material::Lambertian(lambertian) => lambertian.scatter(ray_in, hit_record),
             Material::Metal(metal) => metal.scatter(ray_in, hit_record),
             Material::Dielectric(dielectric) => dielectric.scatter(ray_in, hit_record),
+            Material::DiffuseLight(diffuse_light) => diffuse_light.scatter(ray_in, hit_record),
+        }
+    }
+
+    fn emitted(&self, u: f32, v: f32, point: &Point3) -> Colour {
+        match *self {
+            Material::DiffuseLight(diffuse_light) => diffuse_light.emitted(u, v, point),
+            _ => {
+                return Colour {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }
+            }
         }
     }
 }
@@ -809,7 +853,7 @@ impl Material {
 // }
 
 #[derive(Clone)]
-struct Lambertian {
+pub struct Lambertian {
     albedo: Arc<dyn Texture + Sync + Send>,
 }
 
@@ -838,6 +882,20 @@ impl Lambertian {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct DiffuseLight {
+    colour: Colour,
+}
+impl DiffuseLight {
+    fn scatter(&self, _ray_in: Ray, _hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+        return None;
+    }
+
+    fn emitted(&self, u: f32, v: f32, point: &Point3) -> Colour {
+        return self.colour;
+    }
+}
+
 // I didn't really follow the whole derivation of this.
 // See section 10.2
 fn refract(uv: Vec3, normal: Vec3, eta_over_eta_prime: f32) -> Vec3 {
@@ -850,7 +908,7 @@ fn refract(uv: Vec3, normal: Vec3, eta_over_eta_prime: f32) -> Vec3 {
 }
 
 #[derive(Clone, Copy)]
-struct Metal {
+pub struct Metal {
     albedo: Colour,
     fuzz: f32,
 }
@@ -875,7 +933,7 @@ impl Metal {
 }
 
 #[derive(Clone, Copy)]
-struct Dielectric {
+pub struct Dielectric {
     index_of_refraction: f32,
 }
 impl Dielectric {
@@ -935,7 +993,7 @@ fn reflect(incoming_ray: Vec3, surface_normal: Vec3) -> Vec3 {
 }
 
 #[derive(Clone, Copy)]
-struct BoundingBox {
+pub struct BoundingBox {
     minimum: Point3,
     maximum: Point3,
 }
@@ -1027,6 +1085,7 @@ enum HittableObject<'a> {
     Sphere(Sphere),
     HittableList(HittableList<'a>),
     BVH(BVH<'a>),
+    Rectangle(Rectangle),
 }
 
 impl<'a> HittableObject<'a> {
@@ -1035,6 +1094,7 @@ impl<'a> HittableObject<'a> {
             HittableObject::Sphere(sphere) => sphere.hit(ray, t_min, t_max),
             HittableObject::BVH(bvh) => bvh.hit(ray, t_min, t_max),
             HittableObject::HittableList(hittable_list) => hittable_list.hit(ray, t_min, t_max),
+            HittableObject::Rectangle(rectangle) => rectangle.hit(ray, t_min, t_max),
         }
     }
     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
@@ -1042,6 +1102,7 @@ impl<'a> HittableObject<'a> {
             HittableObject::Sphere(sphere) => sphere.bounding_box(time0, time1),
             HittableObject::BVH(bvh) => bvh.bounding_box(time0, time1),
             HittableObject::HittableList(hittable_list) => hittable_list.bounding_box(time0, time1),
+            HittableObject::Rectangle(rectangle) => rectangle.bounding_box(time0, time1),
         }
     }
 }
