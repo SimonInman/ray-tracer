@@ -1,3 +1,5 @@
+pub mod texture;
+
 use rand::Rng;
 use rayon::iter::Fold;
 use rayon::prelude::*;
@@ -544,6 +546,11 @@ struct HitRecord {
     t: f32,
     is_front_face: bool,
     material: Material,
+    // surface co-ordinates of the hit point
+    // This seems a slightly odd representation, see section
+    // 4.2 of The Next Week for details.
+    u: f32,
+    v: f32,
 }
 
 impl HitRecord {
@@ -671,6 +678,23 @@ impl Sphere {
             maximum: self.centre.add(&radius_box),
         };
         return Some(output);
+    }
+
+    // p: a given point on the sphere of radius one, centered at the origin.
+    // u: returned value [0,1] of angle around the Y axis from X=-1.
+    // v: returned value [0,1] of angle from Y=-1 to Y=+1.
+    //     <1 0 0> yields <0.50 0.50>       <-1  0  0> yields <0.00 0.50>
+    //     <0 1 0> yields <0.50 1.00>       < 0 -1  0> yields <0.50 0.00>
+    //     <0 0 1> yields <0.25 0.50>       < 0  0 -1> yields <0.75 0.50>
+    fn get_sphere_uv(point: &Point3) -> (f32, f32) {
+
+        //todo should test this
+        let pi = std::f32::consts::PI ;
+        let theta = -point.y.acos();
+        let phi = -point.z.atan2(point.x) + pi;
+
+        return (phi / (2.0*pi), theta / pi);
+
     }
 }
 
