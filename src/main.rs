@@ -3,12 +3,16 @@ pub mod texture;
 use rand::Rng;
 use rayon::iter::Fold;
 use rayon::prelude::*;
+use texture::CheckerTexture;
+use texture::SolidColour;
+use texture::Texture;
 use std::cmp::Ordering;
 use std::f32::consts;
 
 use std::iter;
 use std::ops;
 use std::ops::Rem;
+use std::sync::Arc;
 
 const MAX_T: f32 = 20000.0;
 
@@ -18,24 +22,25 @@ fn main() {
     let aspect_ratio = 3.0 / 2.0;
     let image_width = 1200;
     let image_height: i32 = (image_width as f32 / aspect_ratio) as i32;
-    let samples_per_pixel = 500;
+    let samples_per_pixel = 50;
+    // let samples_per_pixel = 500;
     let max_depth = 50;
 
     // World
-    let material_ground = Lambertian {
-        albedo: Colour {
+    let material_ground = Lambertian::new(
+        Colour {
             x: 0.8,
             y: 0.8,
             z: 0.0,
         },
-    };
-    let material_centre = Lambertian {
-        albedo: Colour {
+    );
+    let material_centre = Lambertian::new(
+         Colour {
             x: 0.1,
             y: 0.2,
             z: 0.5,
         },
-    };
+    );
     // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
     let material_left = Dielectric {
         index_of_refraction: 1.5,
@@ -54,9 +59,8 @@ fn main() {
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
 
-
     let look_from = Point3 {
-        x: 13.0,
+        x: -13.0,
         y: 2.0,
         z: 3.0,
     };
@@ -93,11 +97,6 @@ fn main() {
     // See https://raytracing.github.io/images/fig-1.03-cam-geom.jpg
     for j in (0..image_height).rev() {
         for i in 0..image_width {
-            // let mut pixel_colour = Colour {
-            //     x: 0.0,
-            //     y: 0.0,
-            //     z: 0.0,
-            // };
 
             let aggregated_pixel = (0..samples_per_pixel)
                 .into_par_iter()
@@ -133,20 +132,18 @@ fn main() {
 }
 
 fn many_spheres() -> Vec<HittableObject<'static>> {
-    let material_ground = Lambertian {
-        albedo: Colour {
+    let material_ground = Lambertian::new(
+         Colour {
             x: 0.5,
             y: 0.5,
             z: 0.5,
         },
-    };
-    let material_lambertian = Lambertian {
-        albedo: Colour {
-            x: 0.4,
-            y: 0.2,
-            z: 0.1,
-        },
-    };
+    );
+    let checker_texture = CheckerTexture::new(
+         Colour { x: 0.8, y: 0.5, z: 0.1},
+         Colour { x: 0.1, y: 0.2, z: 0.8});
+    let material_lambertian = Lambertian{albedo: 
+        Arc::new(checker_texture) };
     // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
     let material_glass = Dielectric {
         index_of_refraction: 1.5,
@@ -253,13 +250,13 @@ fn random_lambertian() -> Lambertian {
     // Sample code does:
     // auto albedo = color::random() * color::random();
     // which is a pointwise multipleication of random colours.
-    return Lambertian {
-        albedo: Colour {
+    return Lambertian::new(
+        Colour {
             x: random_unit() * random_unit(),
             y: random_unit() * random_unit(),
             z: random_unit() * random_unit(),
         },
-    };
+    );
 }
 
 fn random_metal() -> Metal {
@@ -412,7 +409,7 @@ type Colour = Vec3;
 type Point3 = Vec3;
 
 #[derive(Clone, Copy, Debug)]
-struct Vec3 {
+pub struct Vec3 {
     x: f32,
     y: f32,
     z: f32,
@@ -522,6 +519,8 @@ fn hit_record_with_norml<'a>(
     material: &Material,
     ray: &Ray,
     outward_normal: Vec3,
+    u: f32,
+    v: f32,
 ) -> HitRecord {
     let is_front_face = dot(ray.direction, outward_normal) < 0.0;
     let normal = if is_front_face {
@@ -535,10 +534,12 @@ fn hit_record_with_norml<'a>(
         t,
         is_front_face,
         material: (*material).clone(),
+        u,
+        v,
     };
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct HitRecord {
     // P is the point of hitting
     p: Point3,
@@ -624,7 +625,7 @@ fn surrounding_box(box_0: &BoundingBox, box_1: &BoundingBox) -> BoundingBox {
     };
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Sphere {
     centre: Point3,
     radius: f32,
@@ -658,12 +659,14 @@ impl Sphere {
         }
         let p = ray.at(root);
         let outward_normal = p.subtract(&self.centre).divide(self.radius);
+        let (u, v) = Sphere::get_sphere_uv(&p);
         return Some(hit_record_with_norml(
             p,
             root,
             &self.material,
             ray,
             outward_normal,
+            u, v, 
         ));
     }
 
@@ -880,7 +883,7 @@ fn random_unit_vector() -> Vec3 {
     return random_in_unit_sphere().unit_vector();
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Material {
     Lambertian(Lambertian),
     Metal(Metal),
@@ -889,8 +892,8 @@ enum Material {
 
 impl Material {
     fn scatter(&self, ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
-        match *self {
-            Material::Lambertian(lamberian) => lamberian.scatter(ray_in, hit_record),
+        match &*self {
+            Material::Lambertian(lambertian) => lambertian.scatter(ray_in, hit_record),
             Material::Metal(metal) => metal.scatter(ray_in, hit_record),
             Material::Dielectric(dielectric) => dielectric.scatter(ray_in, hit_record),
         }
@@ -901,9 +904,9 @@ impl Material {
 //     fn scatter(&self,ray_in : Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)>;
 // }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Lambertian {
-    albedo: Colour,
+    albedo: Arc<dyn Texture + Sync + Send>,
 }
 
 // impl Material for Lambertian {
@@ -919,7 +922,19 @@ impl Lambertian {
             direction: scatter_direction,
         };
 
-        return Some((scattered_ray, self.albedo));
+        let attenuation = self.albedo.value(hit_record.u, 
+            hit_record.v, 
+            &hit_record.p,);
+
+        return Some((scattered_ray, attenuation));
+    }
+
+    fn new(albedo: Colour) -> Lambertian {
+        return Lambertian { 
+            albedo: Arc::new(
+                SolidColour::new( albedo)
+            ) 
+        };
     }
 }
 
@@ -1120,7 +1135,7 @@ impl<'a> HittableObject<'a> {
         match self {
             HittableObject::Sphere(sphere) => sphere.hit(ray, t_min, t_max),
             HittableObject::BVH(bvh) => bvh.hit(ray, t_min, t_max),
-            HittableObject::HittableList(hittableList) => hittableList.hit(ray, t_min, t_max),
+            HittableObject::HittableList(hittable_list) => hittable_list.hit(ray, t_min, t_max),
             
         }
     }
@@ -1128,7 +1143,7 @@ impl<'a> HittableObject<'a> {
         match self {
             HittableObject::Sphere(sphere) => sphere.bounding_box(time0, time1),
             HittableObject::BVH(bvh) => bvh.bounding_box(time0, time1),
-            HittableObject::HittableList(hittableList) => hittableList.bounding_box(time0, time1),
+            HittableObject::HittableList(hittable_list) => hittable_list.bounding_box(time0, time1),
         }
     }
 }
@@ -1239,7 +1254,7 @@ impl BVH<'_> {
         let hit_left = self.left.hit(ray, t_min, t_max);
         match hit_left {
             None => return self.right.hit(ray, t_min, t_max),
-            Some(hit_on_left) => return self.right.hit(ray, t_min, hit_on_left.t).or(hit_left),
+            Some(ref hit_on_left) => return self.right.hit(ray, t_min, hit_on_left.t).or(hit_left),
         }
     }
 
