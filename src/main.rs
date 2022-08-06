@@ -26,30 +26,6 @@ fn main() {
     // let samples_per_pixel = 500;
     let max_depth = 50;
 
-    // World
-    let material_ground = Lambertian::new(Colour {
-        x: 0.8,
-        y: 0.8,
-        z: 0.0,
-    });
-    let material_centre = Lambertian::new(Colour {
-        x: 0.1,
-        y: 0.2,
-        z: 0.5,
-    });
-    // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
-    let material_left = Dielectric {
-        index_of_refraction: 1.5,
-    };
-    let material_right = Metal {
-        albedo: Colour {
-            x: 0.8,
-            y: 0.6,
-            z: 0.2,
-        },
-        fuzz: 1.0,
-    };
-
     let mut build_spheres = many_spheres();
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
@@ -87,8 +63,6 @@ fn main() {
     println!("{}", image_height.to_string());
     println!("255");
 
-    // let mut rng  = StdRng::from_entropy();
-
     // See https://raytracing.github.io/images/fig-1.03-cam-geom.jpg
     for j in (0..image_height).rev() {
         for i in 0..image_width {
@@ -114,17 +88,6 @@ fn main() {
                     |accum, color| accum.add(&color),
                 );
 
-            // for sample in 0..samples_per_pixel {
-            //     let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
-            //     let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
-            //     let ray = camera.get_ray(u, v);
-            //     pixel_colour = pixel_colour.add(&ray_colour(
-            //         ray,
-            //         &world,
-            //         max_depth,
-            //         fake_random(sample, false) * 100.0,
-            //     ));
-            // }
             write_pixel(aggregated_pixel, samples_per_pixel);
         }
     }
@@ -151,13 +114,9 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
     let material_lambertian = Lambertian {
         albedo: Arc::new(checker_texture),
     };
-    // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
     let material_glass = Dielectric {
         index_of_refraction: 1.5,
     };
-
-    // let material_left = Lambertian{albedo:Colour{x: 0.0, y:0.0, z:1.0}};
-    // let material_right = Lambertian{albedo:Colour{x: 1.0, y:0.0, z:0.0}};
 
     let mut world_list: Vec<HittableObject> = Vec::new();
     // Add "ground" sphere.
@@ -277,21 +236,6 @@ fn random_metal() -> Metal {
         fuzz: fuzz,
     };
 }
-
-// fn ray_colour(ray: Ray) -> Colour {
-//     // println!("ray.direction.y is {}",ray.direction.y);
-//     let unit_direction = ray.direction.unit_vector();
-//     let t = 0.5 * (unit_direction.y + 1.0);
-//     let white = Colour{x: 1.0, y: 1.0, z:1.0};
-//     let colour2 = Colour{x: 0.1, y: 0.3, z:1.0};
-//     // let colour2 = Colour{x: 0.5, y: 0.7, z:1.0};
-
-//     // red =  x = (1-t)*1 + t*0.5 = 1 - t*(0.5)
-//     // green =  y = (1-t)*1 + t*0.7 = 1 - t*(0.3)
-//     // blue =  z = (1-t)*1 + t*1.0 = 1
-//     // So the same amount of blue, and less and less red and green as t increases
-//     return white.multiply(1.0 - t).add(&colour2.multiply(t));
-// }
 
 fn write_pixel(colour: Colour, samples_per_pixel: i32) {
     let scale = 1.0 / (samples_per_pixel as f32);
@@ -419,15 +363,6 @@ pub struct Vec3 {
     y: f32,
     z: f32,
 }
-
-// impl  ops::Add<Vec3> for Vec3 {
-//     fn add(self, to_add: Vec3) -> Vec3 {
-//         return self.add(to_add);
-//     }
-
-//     type Output = Vec3;
-
-// }
 
 impl Vec3 {
     fn add(&self, other: &Vec3) -> Vec3 {
