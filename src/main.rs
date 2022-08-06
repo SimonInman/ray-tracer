@@ -3,11 +3,11 @@ pub mod texture;
 use rand::Rng;
 use rayon::iter::Fold;
 use rayon::prelude::*;
+use std::cmp::Ordering;
+use std::f32::consts;
 use texture::CheckerTexture;
 use texture::SolidColour;
 use texture::Texture;
-use std::cmp::Ordering;
-use std::f32::consts;
 
 use std::iter;
 use std::ops;
@@ -27,20 +27,16 @@ fn main() {
     let max_depth = 50;
 
     // World
-    let material_ground = Lambertian::new(
-        Colour {
-            x: 0.8,
-            y: 0.8,
-            z: 0.0,
-        },
-    );
-    let material_centre = Lambertian::new(
-         Colour {
-            x: 0.1,
-            y: 0.2,
-            z: 0.5,
-        },
-    );
+    let material_ground = Lambertian::new(Colour {
+        x: 0.8,
+        y: 0.8,
+        z: 0.0,
+    });
+    let material_centre = Lambertian::new(Colour {
+        x: 0.1,
+        y: 0.2,
+        z: 0.5,
+    });
     // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
     let material_left = Dielectric {
         index_of_refraction: 1.5,
@@ -53,7 +49,6 @@ fn main() {
         },
         fuzz: 1.0,
     };
-
 
     let mut build_spheres = many_spheres();
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
@@ -97,14 +92,18 @@ fn main() {
     // See https://raytracing.github.io/images/fig-1.03-cam-geom.jpg
     for j in (0..image_height).rev() {
         for i in 0..image_width {
-
             let aggregated_pixel = (0..samples_per_pixel)
                 .into_par_iter()
                 .map(|sample| {
                     let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
                     let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
                     let ray = camera.get_ray(u, v);
-                    return ray_colour(ray, &boxed_world, max_depth, fake_random(sample, false) * 100.0);
+                    return ray_colour(
+                        ray,
+                        &boxed_world,
+                        max_depth,
+                        fake_random(sample, false) * 100.0,
+                    );
                 })
                 .reduce(
                     || Colour {
@@ -132,18 +131,26 @@ fn main() {
 }
 
 fn many_spheres() -> Vec<HittableObject<'static>> {
-    let material_ground = Lambertian::new(
-         Colour {
-            x: 0.5,
+    let material_ground = Lambertian::new(Colour {
+        x: 0.5,
+        y: 0.5,
+        z: 0.5,
+    });
+    let checker_texture = CheckerTexture::new(
+        Colour {
+            x: 0.8,
             y: 0.5,
-            z: 0.5,
+            z: 0.1,
+        },
+        Colour {
+            x: 0.1,
+            y: 0.2,
+            z: 0.8,
         },
     );
-    let checker_texture = CheckerTexture::new(
-         Colour { x: 0.8, y: 0.5, z: 0.1},
-         Colour { x: 0.1, y: 0.2, z: 0.8});
-    let material_lambertian = Lambertian{albedo: 
-        Arc::new(checker_texture) };
+    let material_lambertian = Lambertian {
+        albedo: Arc::new(checker_texture),
+    };
     // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
     let material_glass = Dielectric {
         index_of_refraction: 1.5,
@@ -250,13 +257,11 @@ fn random_lambertian() -> Lambertian {
     // Sample code does:
     // auto albedo = color::random() * color::random();
     // which is a pointwise multipleication of random colours.
-    return Lambertian::new(
-        Colour {
-            x: random_unit() * random_unit(),
-            y: random_unit() * random_unit(),
-            z: random_unit() * random_unit(),
-        },
-    );
+    return Lambertian::new(Colour {
+        x: random_unit() * random_unit(),
+        y: random_unit() * random_unit(),
+        z: random_unit() * random_unit(),
+    });
 }
 
 fn random_metal() -> Metal {
@@ -573,7 +578,7 @@ struct HittableList<'a> {
 }
 
 impl HittableList<'_> {
-// impl HittableObject for HittableList<'_> {
+    // impl HittableObject for HittableList<'_> {
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let mut temp_record = None;
         let mut hit_anything = false;
@@ -594,17 +599,14 @@ impl HittableList<'_> {
     }
 
     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
-
         let maybe_boxes = self
             .objects
             .into_iter()
             .map(|obj| obj.bounding_box(time0, time1));
         let boxes_if_zero_nones = maybe_boxes.collect::<Option<Vec<BoundingBox>>>()?;
         return boxes_if_zero_nones
-                    .into_iter()
-                    .reduce(|box1, box2| surrounding_box(&box1, &box2))
-            
-        
+            .into_iter()
+            .reduce(|box1, box2| surrounding_box(&box1, &box2));
     }
 }
 
@@ -666,7 +668,8 @@ impl Sphere {
             &self.material,
             ray,
             outward_normal,
-            u, v, 
+            u,
+            v,
         ));
     }
 
@@ -690,14 +693,12 @@ impl Sphere {
     //     <0 1 0> yields <0.50 1.00>       < 0 -1  0> yields <0.50 0.00>
     //     <0 0 1> yields <0.25 0.50>       < 0  0 -1> yields <0.75 0.50>
     fn get_sphere_uv(point: &Point3) -> (f32, f32) {
-
         //todo should test this
-        let pi = std::f32::consts::PI ;
+        let pi = std::f32::consts::PI;
         let theta = -point.y.acos();
         let phi = -point.z.atan2(point.x) + pi;
 
-        return (phi / (2.0*pi), theta / pi);
-
+        return (phi / (2.0 * pi), theta / pi);
     }
 }
 
@@ -922,18 +923,14 @@ impl Lambertian {
             direction: scatter_direction,
         };
 
-        let attenuation = self.albedo.value(hit_record.u, 
-            hit_record.v, 
-            &hit_record.p,);
+        let attenuation = self.albedo.value(hit_record.u, hit_record.v, &hit_record.p);
 
         return Some((scattered_ray, attenuation));
     }
 
     fn new(albedo: Colour) -> Lambertian {
-        return Lambertian { 
-            albedo: Arc::new(
-                SolidColour::new( albedo)
-            ) 
+        return Lambertian {
+            albedo: Arc::new(SolidColour::new(albedo)),
         };
     }
 }
@@ -1117,7 +1114,7 @@ impl BoundingBox {
 
 #[derive(Clone)]
 struct BVH<'a> {
-    left: Box<HittableObject<'a>> ,
+    left: Box<HittableObject<'a>>,
     right: Box<HittableObject<'a>>,
     bounding_box: BoundingBox,
 }
@@ -1130,13 +1127,11 @@ enum HittableObject<'a> {
 }
 
 impl<'a> HittableObject<'a> {
-
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         match self {
             HittableObject::Sphere(sphere) => sphere.hit(ray, t_min, t_max),
             HittableObject::BVH(bvh) => bvh.hit(ray, t_min, t_max),
             HittableObject::HittableList(hittable_list) => hittable_list.hit(ray, t_min, t_max),
-            
         }
     }
     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
@@ -1148,60 +1143,54 @@ impl<'a> HittableObject<'a> {
     }
 }
 
-
 impl<'a> BVH<'a> {
-    
-    fn build_bvh(objects: &'a mut [ HittableObject ], time0: f32, time1: f32) -> BVH<'a> {
-    let comparator = get_random_axis_comparator();
-    let left: HittableObject;
-    let right: HittableObject;
+    fn build_bvh(objects: &'a mut [HittableObject], time0: f32, time1: f32) -> BVH<'a> {
+        let comparator = get_random_axis_comparator();
+        let left: HittableObject;
+        let right: HittableObject;
 
-    let object_span = objects.len();
-    if object_span == 1 {
-        left = objects[0].clone();
-        right = objects[0].clone();
-    } else if object_span == 2 {
-        if comparator(&&objects[0], &&objects[1]) == Ordering::Less {
+        let object_span = objects.len();
+        if object_span == 1 {
             left = objects[0].clone();
-            right = objects[1].clone();
-        } else {
-            left = objects[1].clone();
             right = objects[0].clone();
+        } else if object_span == 2 {
+            if comparator(&&objects[0], &&objects[1]) == Ordering::Less {
+                left = objects[0].clone();
+                right = objects[1].clone();
+            } else {
+                left = objects[1].clone();
+                right = objects[0].clone();
+            }
+        } else {
+            objects.sort_by(comparator);
+            let (new_head, new_tail) = objects.split_at_mut(objects.len() / 2);
+            left = HittableObject::BVH(BVH::build_bvh(new_head, time0, time1));
+            right = HittableObject::BVH(BVH::build_bvh(new_tail, time0, time1));
         }
-    } else {
-        objects.sort_by(comparator);
-        let (new_head, new_tail) = objects.split_at_mut(objects.len()/2);
-        left = HittableObject::BVH( BVH::build_bvh(new_head, time0, time1));
-        right = HittableObject::BVH(BVH::build_bvh(new_tail, time0, time1));
 
+        let left_bb = left.bounding_box(time0, time1);
+        let right_bb = right.bounding_box(time0, time1);
+        if left_bb.is_none() || right_bb.is_none() {
+            unreachable!("Can't construct a BVH if the objects aren't bounded!");
+        }
+        let left_box = Box::new(left);
+        let right_box = Box::new(right);
+
+        return BVH {
+            left: left_box,
+            right: right_box,
+            bounding_box: surrounding_box(&left_bb.unwrap(), &right_bb.unwrap()),
+        };
     }
-
-    let left_bb = left.bounding_box(time0, time1);
-    let right_bb = right.bounding_box(time0, time1);
-    if left_bb.is_none() || right_bb.is_none() {
-        unreachable!("Can't construct a BVH if the objects aren't bounded!");
-    }
-    let left_box = Box::new(left);
-    let right_box = Box::new(right);
-
-    return BVH {
-        left: left_box,
-        right: right_box,
-        bounding_box: surrounding_box(&left_bb.unwrap(), &right_bb.unwrap()),
-    };
-}
 }
 
-fn get_random_axis_comparator() -> fn(&HittableObject, &HittableObject) -> Ordering
-{
-
+fn get_random_axis_comparator() -> fn(&HittableObject, &HittableObject) -> Ordering {
     let noise: i32 = rand::random();
     if noise % 3 == 0 {
-
-    return box_compare_x;
+        return box_compare_x;
     } else if noise % 3 == 1 {
-    return box_compare_y;
-    } else  {
+        return box_compare_y;
+    } else {
         return box_compare_z;
     }
 }
@@ -1216,11 +1205,7 @@ fn box_compare_z(box0: &HittableObject, box1: &HittableObject) -> Ordering {
     return box_compare(box0, box1, 2);
 }
 
-fn box_compare(
-    box0: &HittableObject,
-    box1: &HittableObject,
-    axis: i32,
-) -> Ordering {
+fn box_compare(box0: &HittableObject, box1: &HittableObject, axis: i32) -> Ordering {
     let box_a = box0.bounding_box(0.0, 0.0).unwrap();
     let box_b = box1.bounding_box(0.0, 0.0).unwrap();
     if axis == 0 {
