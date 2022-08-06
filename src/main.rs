@@ -69,14 +69,13 @@ fn main() {
             let aggregated_pixel = (0..samples_per_pixel)
                 .into_par_iter()
                 .map(|sample| {
-                    let u = (i as f32 + fake_random(sample, true)) / (image_width as f32 - 1.0); // why minus one?
-                    let v = (j as f32 + fake_random(sample, false)) / (image_height as f32 - 1.0); // why minus one?
+                    let u = (i as f32 + random_unit()) / (image_width as f32 - 1.0); // why minus one?
+                    let v = (j as f32 + random_unit()) / (image_height as f32 - 1.0); // why minus one?
                     let ray = camera.get_ray(u, v);
                     return ray_colour(
                         ray,
                         &boxed_world,
                         max_depth,
-                        fake_random(sample, false) * 100.0,
                     );
                 })
                 .reduce(
@@ -298,9 +297,7 @@ fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
 // (If you're standing at P on earth, the direction to the centre of the earth is
 // C - P, so the opposite direction is P-C).
 // The chose colour is to take the unit normal and use it's parameters as colours.
-// TODO the seed is only needed because I'm using my pseudorandom function. Can be deleted when
-// I use real random.
-fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, seed: f32) -> Colour {
+fn ray_colour(ray: Ray, world: &HittableObject, depth: i32) -> Colour {
     if depth <= 0 {
         return Colour {
             x: 0.0,
@@ -316,7 +313,7 @@ fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, seed: f32) -> Colour
             match maybe_reflection {
                 //todo rename colour to attenutation when i understand what that is.
                 Some((reflected_ray, surface_colour)) => {
-                    let reflection_colour = ray_colour(reflected_ray, world, depth - 1, seed);
+                    let reflection_colour = ray_colour(reflected_ray, world, depth - 1);
                     return Colour {
                         x: surface_colour.x * reflection_colour.x,
                         y: surface_colour.y * reflection_colour.y,
@@ -744,35 +741,6 @@ fn clamp(x: f32, min: f32, max: f32) -> f32 {
         return max;
     }
     return x;
-}
-
-// This is meant to loosely be a random function, because I'm on a plane
-// and a) can't look up how you actually do random in
-// rust  and b) can't install the rand package.
-fn fake_random(sample: i32, is_u: bool) -> f32 {
-    let seed = (sample + if is_u { 1 } else { 2 }) as f32;
-    return fake_random_unit(seed);
-}
-
-// fn random_unit() -> f32 {
-//     let mut rn
-// }
-
-// Returns a pseudorandom number in [0, 1) using pi as "randomness"
-// source.
-fn fake_random_unit(seed: f32) -> f32 {
-    let times_pi = seed * std::f32::consts::PI;
-
-    let integer_part = times_pi.floor() as i32;
-
-    let randomly_negative = (integer_part % 2) == 0;
-
-    let fraction_part = times_pi - (integer_part as f32);
-
-    assert!(fraction_part < 1.0);
-    assert!(fraction_part >= 0.0);
-
-    return fraction_part * if randomly_negative { -1.0 } else { 1.0 };
 }
 
 fn random_unit() -> f32 {
