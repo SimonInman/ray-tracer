@@ -4,19 +4,14 @@ pub mod rectangle;
 use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
-use rayon::iter::Fold;
 use rayon::prelude::*;
 use rectangle::Rectangle;
 use std::cmp::Ordering;
 use std::env;
-use std::f32::consts;
 use texture::CheckerTexture;
 use texture::SolidColour;
 use texture::Texture;
 
-use std::iter;
-use std::ops;
-use std::ops::Rem;
 use std::sync::Arc;
 
 const MAX_T: f32 = 20000.0;
@@ -66,7 +61,7 @@ fn main() {
         aperture,
         dist_to_focus,
     );
-    let background = Colour{x: 0.70, y:  0.80,z: 1.00};
+    // let background = Colour{x: 0.70, y:  0.80,z: 1.00};
     let black_background = Colour{x: 0.0, y:  0.0,z: 0.00};
  
 
@@ -81,7 +76,7 @@ fn main() {
         for i in 0..image_width {
             let aggregated_pixel = (0..samples_per_pixel)
                 .into_par_iter()
-                .map(|sample| {
+                .map(|_sample| {
                     let u = (i as f32 + random_unit()) / (image_width as f32 - 1.0); // why minus one?
                     let v = (j as f32 + random_unit()) / (image_height as f32 - 1.0); // why minus one?
                     let ray = camera.get_ray(u, v);
@@ -250,14 +245,10 @@ fn random_lambertian(rng: &mut StdRng) -> Lambertian {
         x: random_colour_value(),
         y: random_colour_value(),
         z: random_colour_value(),
-        // x: random_unit() * random_unit(),
-        // y: random_unit() * random_unit(),
-        // z: random_unit() * random_unit(),
     });
 }
 
-fn random_metal(mut rng: &mut StdRng) -> Metal {
-    // let mut rng = rand::thread_rng();
+fn random_metal(rng: &mut StdRng) -> Metal {
     let fuzz = rng.gen_range(0.0..0.5);
     return Metal {
         albedo: Colour {
@@ -305,21 +296,21 @@ fn cross(u: Vec3, v: Vec3) -> Vec3 {
 // (The half_b optimisation is described in section 6.2.)
 //
 // Returns the time t at which the ray first hit the sphere.
-fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
-    let origin_centre = ray.origin.subtract(&centre);
-    let a = dot(ray.direction, ray.direction);
-    let half_b = dot(origin_centre, ray.direction);
-    // let b = 2.0 * dot(origin_centre, ray.direction);
-    let c = dot(origin_centre, origin_centre) - radius * radius;
-    let discriminant = half_b * half_b - a * c;
-    // return discriminant > 0.0;
-    if discriminant < 0.0 {
-        return None;
-    } else {
-        // Returning first hit, which is lowest t, so -b - sqrt(disc)/2a
-        return Some((-half_b - discriminant.sqrt()) / a);
-    }
-}
+// fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
+//     let origin_centre = ray.origin.subtract(&centre);
+//     let a = dot(ray.direction, ray.direction);
+//     let half_b = dot(origin_centre, ray.direction);
+//     // let b = 2.0 * dot(origin_centre, ray.direction);
+//     let c = dot(origin_centre, origin_centre) - radius * radius;
+//     let discriminant = half_b * half_b - a * c;
+//     // return discriminant > 0.0;
+//     if discriminant < 0.0 {
+//         return None;
+//     } else {
+//         // Returning first hit, which is lowest t, so -b - sqrt(disc)/2a
+//         return Some((-half_b - discriminant.sqrt()) / a);
+//     }
+// }
 
 /// Colour a ray depending on if it hits a sphere at the centre of our viewport.
 /// If not hit (i.e. time_hit is None), display background gradient as in commented
@@ -506,18 +497,18 @@ pub struct HitRecord {
     v: f32,
 }
 
-impl HitRecord {
-    fn set_face_normal(&mut self, ray: &Ray, outward_normal: Vec3) {
-        // If the ray direciton and outward normal are in opposite direction (dot
-        // product < 0), then the ray is hitting the outside.
-        self.is_front_face = dot(ray.direction, outward_normal) < 0.0;
-        self.normal = if self.is_front_face {
-            outward_normal
-        } else {
-            outward_normal.multiply(-1.0)
-        };
-    }
-}
+// impl HitRecord {
+//     fn set_face_normal(&mut self, ray: &Ray, outward_normal: Vec3) {
+//         // If the ray direciton and outward normal are in opposite direction (dot
+//         // product < 0), then the ray is hitting the outside.
+//         self.is_front_face = dot(ray.direction, outward_normal) < 0.0;
+//         self.normal = if self.is_front_face {
+//             outward_normal
+//         } else {
+//             outward_normal.multiply(-1.0)
+//         };
+//     }
+// }
 
 #[derive(Clone, Copy)]
 struct HittableList<'a> {
@@ -528,7 +519,6 @@ impl HittableList<'_> {
     // impl HittableObject for HittableList<'_> {
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let mut temp_record = None;
-        let mut hit_anything = false;
         let mut closest_so_far = t_max;
 
         for scene_object in self.objects {
@@ -536,7 +526,6 @@ impl HittableList<'_> {
             match this_hit_record {
                 Some(hit_record) => {
                     closest_so_far = hit_record.t;
-                    hit_anything = true;
                     temp_record = Some(hit_record);
                 }
                 None => (),
@@ -620,7 +609,7 @@ impl Sphere {
         ));
     }
 
-    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+    fn bounding_box(&self, _time0: f32, _time1: f32) -> Option<BoundingBox> {
         let radius_box = Vec3 {
             x: self.radius,
             y: self.radius,
@@ -650,11 +639,6 @@ impl Sphere {
 }
 
 struct Camera {
-    aspect_ratio: f32,
-    viewport_height: f32,
-    viewport_width: f32,
-    focal_length: f32,
-
     origin: Point3,
     horizontal: Vec3,
     vertical: Vec3,
@@ -662,7 +646,6 @@ struct Camera {
 
     u: Vec3,
     v: Vec3,
-    w: Vec3,
     lens_radius: f32,
 }
 
@@ -710,11 +693,6 @@ fn build_camera(
     let u = cross(v_up, w);
     let v = cross(w, u);
 
-    // let viewport_height = 2.0;
-    // let aspect_ratio = 16.0 / 9.0;
-    // let viewport_width = aspect_ratio * viewport_height;
-    let focal_length = 1.0;
-
     let origin = look_from;
     let horizontal = u.multiply(viewport_width).multiply(focus_dist);
     let vertical = v.multiply(viewport_height).multiply(focus_dist);
@@ -727,11 +705,6 @@ fn build_camera(
     let lens_radius = aperture / 2.0;
 
     return Camera {
-        aspect_ratio: 16.0 / 9.0,
-        viewport_height,
-        viewport_width,
-        focal_length,
-
         origin,
         horizontal,
         vertical,
@@ -739,7 +712,6 @@ fn build_camera(
 
         u,
         v,
-        w,
         lens_radius,
     };
 }
@@ -847,7 +819,7 @@ pub struct Lambertian {
 
 // impl Material for Lambertian {
 impl Lambertian {
-    fn scatter(&self, ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+    fn scatter(&self, _ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
         let mut scatter_direction = hit_record.normal.add(&random_unit_vector());
         if scatter_direction.near_zero() {
             scatter_direction = hit_record.normal;
@@ -879,7 +851,7 @@ impl DiffuseLight {
         return None;
     }
 
-    fn emitted(&self, u: f32, v: f32, point: &Point3) -> Colour {
+    fn emitted(&self, _u: f32, _v: f32, _point: &Point3) -> Colour {
         return self.colour;
     }
 }
@@ -1011,11 +983,8 @@ pub struct BoundingBox {
 
 //         let min = x_interval.0.min(y_interval.0.min(z_interval.0));
 //         let max = x_interval.1.max(y_interval.1.max(z_interval.1));
-
 //         return min < max;
-
 //     }
-
 // }
 
 impl BoundingBox {
@@ -1195,7 +1164,7 @@ impl BVH<'_> {
         }
     }
 
-    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+    fn bounding_box(&self, _time0: f32, _time1: f32) -> Option<BoundingBox> {
         return Some(self.bounding_box);
     }
 }
