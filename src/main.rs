@@ -2,10 +2,13 @@ pub mod texture;
 pub mod rectangle;
 
 use rand::Rng;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rayon::iter::Fold;
 use rayon::prelude::*;
 use rectangle::Rectangle;
 use std::cmp::Ordering;
+use std::env;
 use std::f32::consts;
 use texture::CheckerTexture;
 use texture::SolidColour;
@@ -19,45 +22,21 @@ use std::sync::Arc;
 const MAX_T: f32 = 20000.0;
 
 fn main() {
-    let r = (std::f32::consts::PI / 4.0).cos();
+
+    let args: Vec<String> = env::args().collect();
+    let light_z_axis_arg = &args[1];
+    let light_z_axis: f32 = light_z_axis_arg.parse().unwrap();
+
     // Image
     let aspect_ratio = 3.0 / 2.0;
-    // let image_width = 600;
-    let image_width = 1200;
+    let image_width = 600;
+    // let image_width = 1200;
     let image_height: i32 = (image_width as f32 / aspect_ratio) as i32;
     let samples_per_pixel = 50;
     // let samples_per_pixel = 500;
     let max_depth = 50;
 
-    // World
-    // let material_ground = Lambertian {
-    //     albedo: Colour {
-    //         x: 0.8,
-    //         y: 0.8,
-    //         z: 0.0,
-    //     },
-    // };
-    // let material_centre = Lambertian {
-    //     albedo: Colour {
-    //         x: 0.1,
-    //         y: 0.2,
-    //         z: 0.5,
-    //     },
-    // };
-    // let material_left = Metal{albedo:Colour{x: 0.8, y:0.8, z:0.8}, fuzz: 0.3};
-    let material_left = Dielectric {
-        index_of_refraction: 1.5,
-    };
-    let material_right = Metal {
-        albedo: Colour {
-            x: 0.8,
-            y: 0.6,
-            z: 0.2,
-        },
-        fuzz: 1.0,
-    };
-
-    let mut build_spheres = many_spheres();
+    let mut build_spheres = many_spheres(light_z_axis);
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
 
@@ -127,7 +106,7 @@ fn main() {
     }
 }
 
-fn many_spheres() -> Vec<HittableObject<'static>> {
+fn many_spheres(light_z_axis: f32) -> Vec<HittableObject<'static>> {
     let light = DiffuseLight{colour: Colour{x:4.0, y:4.0, z:4.0}};
     let material_ground = Lambertian::new(Colour {
         x: 0.5,
@@ -165,15 +144,17 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
         material: Material::Lambertian(material_ground),
     }));
 
-    let world_size = 11;
+    let mut seeded_rng = StdRng::seed_from_u64(230);
+    let world_size = 8;
 
     for a in -world_size..world_size {
         for b in -world_size..world_size {
-            let noise = random_unit();
             let centre = Vec3 {
-                x: random_unit() * 0.9 + a as f32,
+                // x: random_unit() * 0.9 + a as f32,
+                x: seeded_rng.gen_range(0.0..1.0) * 0.9 + a as f32,
                 y: 0.2,
-                z: random_unit() * 0.9 + b as f32,
+                // z: random_unit() * 0.9 + b as f32,
+                z: seeded_rng.gen_range(0.0..1.0) * 0.9 + b as f32,
             };
 
             let threshold_point = Point3 {
@@ -181,6 +162,8 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
                 y: 0.2,
                 z: 0.0,
             };
+
+            let noise = random_unit();
             // Don't render if we're too near?
             if centre.subtract(&threshold_point).length() > 0.9 {
                 if noise < 0.8 {
@@ -188,14 +171,14 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
                     world_list.push(HittableObject::Sphere(Sphere {
                         centre: centre,
                         radius: 0.2,
-                        material: Material::Lambertian(random_lambertian()),
+                        material: Material::Lambertian(random_lambertian(&mut seeded_rng)),
                     }));
                 } else if noise < 0.95 {
                     // Metal
                     world_list.push(HittableObject::Sphere(Sphere {
                         centre: centre,
                         radius: 0.2,
-                        material: Material::Metal(random_metal()),
+                        material: Material::Metal(random_metal(&mut seeded_rng)),
                     }));
                 } else {
                     //glass
@@ -250,7 +233,7 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
         5.0,
         1.0,
         3.0,
-        2.0,
+        light_z_axis,
         Material::DiffuseLight(light)),
     ));
 
@@ -258,20 +241,23 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
     return world_list;
 }
 
-fn random_lambertian() -> Lambertian {
+fn random_lambertian(rng: &mut StdRng) -> Lambertian {
     // Sample code does:
     // auto albedo = color::random() * color::random();
     // which is a pointwise multipleication of random colours.
+    let mut random_colour_value =| | ->  f32 { rng.gen_range(0.0..1.0) * rng.gen_range(0.0..1.0)};
     return Lambertian::new(Colour {
-        x: random_unit() * random_unit(),
-        y: random_unit() * random_unit(),
-        z: random_unit() * random_unit(),
+        x: random_colour_value(),
+        y: random_colour_value(),
+        z: random_colour_value(),
+        // x: random_unit() * random_unit(),
+        // y: random_unit() * random_unit(),
+        // z: random_unit() * random_unit(),
     });
 }
 
-fn random_metal() -> Metal {
-    let mut rng = rand::thread_rng();
-
+fn random_metal(mut rng: &mut StdRng) -> Metal {
+    // let mut rng = rand::thread_rng();
     let fuzz = rng.gen_range(0.0..0.5);
     return Metal {
         albedo: Colour {
@@ -773,12 +759,14 @@ fn clamp(x: f32, min: f32, max: f32) -> f32 {
 }
 
 fn random_unit() -> f32 {
-    let mut rng = rand::thread_rng();
+    // let mut rng = rand::thread_rng();
+    let mut rng = StdRng::seed_from_u64(230);
     return rng.gen_range(0.0..1.0);
 }
 
 fn random_vec3() -> Vec3 {
     let mut rng = rand::thread_rng();
+    // let mut rng = StdRng::seed_from_u64(230);
 
     return Vec3 {
         x: rng.gen_range(0.0..1.0),
