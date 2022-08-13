@@ -994,10 +994,13 @@ impl BoundingBox {
         let y_interval = self.y_hit_interval(ray);
         let z_interval = self.z_hit_interval(ray);
 
-        let min = x_interval.0.min(y_interval.0.min(z_interval.0));
-        let max = x_interval.1.max(y_interval.1.max(z_interval.1));
+        // Now we have three time intervals where the ray crosses the bounding box, one for each axis.
+        // The box is hit IFF these boxes have non-zero intersection. That is, if the highest
+        // min is lower than the lowest max
+        let max_of_mins = t_min.max(x_interval.0.max(y_interval.0.max(z_interval.0)));
+        let min_of_maxes = t_max.min(x_interval.1.min(y_interval.1.min(z_interval.1)));
 
-        return min < max;
+        return max_of_mins < min_of_maxes;
     }
     fn x_hit_interval(&self, ray: &Ray) -> (f32, f32) {
         let x_hit_1 = (self.minimum.x - ray.origin.x) / ray.direction.x;
