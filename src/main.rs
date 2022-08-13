@@ -1,37 +1,42 @@
 pub mod texture;
+pub mod rectangle;
 
 use rand::Rng;
-use rayon::iter::Fold;
+use rand::SeedableRng;
+use rand::rngs::StdRng;
 use rayon::prelude::*;
+use rectangle::Rectangle;
 use std::cmp::Ordering;
-use std::f32::consts;
+use std::env;
 use texture::CheckerTexture;
 use texture::SolidColour;
 use texture::Texture;
 
-use std::iter;
-use std::ops;
-use std::ops::Rem;
 use std::sync::Arc;
 
 const MAX_T: f32 = 20000.0;
 
 fn main() {
-    let r = (std::f32::consts::PI / 4.0).cos();
+
+    let args: Vec<String> = env::args().collect();
+    let light_z_axis_arg = &args[1];
+    let light_z_axis: f32 = light_z_axis_arg.parse().unwrap();
+
     // Image
     let aspect_ratio = 3.0 / 2.0;
-    let image_width = 1200;
+    let image_width = 600;
+    // let image_width = 1200;
     let image_height: i32 = (image_width as f32 / aspect_ratio) as i32;
     let samples_per_pixel = 50;
     // let samples_per_pixel = 500;
     let max_depth = 50;
 
-    let mut build_spheres = many_spheres();
+    let mut build_spheres = many_spheres(light_z_axis);
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
 
     let look_from = Point3 {
-        x: -13.0,
+        x: 13.0,
         y: 2.0,
         z: 3.0,
     };
@@ -56,6 +61,9 @@ fn main() {
         aperture,
         dist_to_focus,
     );
+    // let background = Colour{x: 0.70, y:  0.80,z: 1.00};
+    let black_background = Colour{x: 0.0, y:  0.0,z: 0.00};
+ 
 
     // Render
     println!("P3");
@@ -68,7 +76,7 @@ fn main() {
         for i in 0..image_width {
             let aggregated_pixel = (0..samples_per_pixel)
                 .into_par_iter()
-                .map(|sample| {
+                .map(|_sample| {
                     let u = (i as f32 + random_unit()) / (image_width as f32 - 1.0); // why minus one?
                     let v = (j as f32 + random_unit()) / (image_height as f32 - 1.0); // why minus one?
                     let ray = camera.get_ray(u, v);
@@ -76,6 +84,7 @@ fn main() {
                         ray,
                         &boxed_world,
                         max_depth,
+                        black_background,
                     );
                 })
                 .reduce(
@@ -92,7 +101,8 @@ fn main() {
     }
 }
 
-fn many_spheres() -> Vec<HittableObject<'static>> {
+fn many_spheres(light_z_axis: f32) -> Vec<HittableObject<'static>> {
+    let light = DiffuseLight{colour: Colour{x:4.0, y:4.0, z:4.0}};
     let material_ground = Lambertian::new(Colour {
         x: 0.5,
         y: 0.5,
@@ -129,15 +139,17 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
         material: Material::Lambertian(material_ground),
     }));
 
-    let world_size = 11;
+    let mut seeded_rng = StdRng::seed_from_u64(230);
+    let world_size = 8;
 
     for a in -world_size..world_size {
         for b in -world_size..world_size {
-            let noise = random_unit();
             let centre = Vec3 {
-                x: random_unit() * 0.9 + a as f32,
+                // x: random_unit() * 0.9 + a as f32,
+                x: seeded_rng.gen_range(0.0..1.0) * 0.9 + a as f32,
                 y: 0.2,
-                z: random_unit() * 0.9 + b as f32,
+                // z: random_unit() * 0.9 + b as f32,
+                z: seeded_rng.gen_range(0.0..1.0) * 0.9 + b as f32,
             };
 
             let threshold_point = Point3 {
@@ -145,6 +157,8 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
                 y: 0.2,
                 z: 0.0,
             };
+
+            let noise = random_unit();
             // Don't render if we're too near?
             if centre.subtract(&threshold_point).length() > 0.9 {
                 if noise < 0.8 {
@@ -152,14 +166,14 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
                     world_list.push(HittableObject::Sphere(Sphere {
                         centre: centre,
                         radius: 0.2,
-                        material: Material::Lambertian(random_lambertian()),
+                        material: Material::Lambertian(random_lambertian(&mut seeded_rng)),
                     }));
                 } else if noise < 0.95 {
                     // Metal
                     world_list.push(HittableObject::Sphere(Sphere {
                         centre: centre,
                         radius: 0.2,
-                        material: Material::Metal(random_metal()),
+                        material: Material::Metal(random_metal(&mut seeded_rng)),
                     }));
                 } else {
                     //glass
@@ -208,23 +222,33 @@ fn many_spheres() -> Vec<HittableObject<'static>> {
         radius: 1.0,
         material: Material::Metal(material_metal),
     }));
+
+    world_list.push(HittableObject::Rectangle(Rectangle::new(
+        3.0,
+        5.0,
+        1.0,
+        3.0,
+        light_z_axis,
+        Material::DiffuseLight(light)),
+    ));
+
+
     return world_list;
 }
 
-fn random_lambertian() -> Lambertian {
+fn random_lambertian(rng: &mut StdRng) -> Lambertian {
     // Sample code does:
     // auto albedo = color::random() * color::random();
     // which is a pointwise multipleication of random colours.
+    let mut random_colour_value =| | ->  f32 { rng.gen_range(0.0..1.0) * rng.gen_range(0.0..1.0)};
     return Lambertian::new(Colour {
-        x: random_unit() * random_unit(),
-        y: random_unit() * random_unit(),
-        z: random_unit() * random_unit(),
+        x: random_colour_value(),
+        y: random_colour_value(),
+        z: random_colour_value(),
     });
 }
 
-fn random_metal() -> Metal {
-    let mut rng = rand::thread_rng();
-
+fn random_metal(rng: &mut StdRng) -> Metal {
     let fuzz = rng.gen_range(0.0..0.5);
     return Metal {
         albedo: Colour {
@@ -272,21 +296,21 @@ fn cross(u: Vec3, v: Vec3) -> Vec3 {
 // (The half_b optimisation is described in section 6.2.)
 //
 // Returns the time t at which the ray first hit the sphere.
-fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
-    let origin_centre = ray.origin.subtract(&centre);
-    let a = dot(ray.direction, ray.direction);
-    let half_b = dot(origin_centre, ray.direction);
-    // let b = 2.0 * dot(origin_centre, ray.direction);
-    let c = dot(origin_centre, origin_centre) - radius * radius;
-    let discriminant = half_b * half_b - a * c;
-    // return discriminant > 0.0;
-    if discriminant < 0.0 {
-        return None;
-    } else {
-        // Returning first hit, which is lowest t, so -b - sqrt(disc)/2a
-        return Some((-half_b - discriminant.sqrt()) / a);
-    }
-}
+// fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
+//     let origin_centre = ray.origin.subtract(&centre);
+//     let a = dot(ray.direction, ray.direction);
+//     let half_b = dot(origin_centre, ray.direction);
+//     // let b = 2.0 * dot(origin_centre, ray.direction);
+//     let c = dot(origin_centre, origin_centre) - radius * radius;
+//     let discriminant = half_b * half_b - a * c;
+//     // return discriminant > 0.0;
+//     if discriminant < 0.0 {
+//         return None;
+//     } else {
+//         // Returning first hit, which is lowest t, so -b - sqrt(disc)/2a
+//         return Some((-half_b - discriminant.sqrt()) / a);
+//     }
+// }
 
 /// Colour a ray depending on if it hits a sphere at the centre of our viewport.
 /// If not hit (i.e. time_hit is None), display background gradient as in commented
@@ -297,7 +321,7 @@ fn hit_sphere(centre: Vec3, radius: f32, ray: &Ray) -> Option<f32> {
 // (If you're standing at P on earth, the direction to the centre of the earth is
 // C - P, so the opposite direction is P-C).
 // The chose colour is to take the unit normal and use it's parameters as colours.
-fn ray_colour(ray: Ray, world: &HittableObject, depth: i32) -> Colour {
+fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, background: Colour) -> Colour {
     if depth <= 0 {
         return Colour {
             x: 0.0,
@@ -306,48 +330,30 @@ fn ray_colour(ray: Ray, world: &HittableObject, depth: i32) -> Colour {
         };
     }
 
+    // Did we hit anything?
     let maybe_hit_record = world.hit(&ray, 0.001, MAX_T);
-    match maybe_hit_record {
-        Some(hit_record) => {
-            let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
-            match maybe_reflection {
-                //todo rename colour to attenutation when i understand what that is.
-                Some((reflected_ray, surface_colour)) => {
-                    let reflection_colour = ray_colour(reflected_ray, world, depth - 1);
-                    return Colour {
-                        x: surface_colour.x * reflection_colour.x,
-                        y: surface_colour.y * reflection_colour.y,
-                        z: surface_colour.z * reflection_colour.z,
-                    };
-                }
+    if maybe_hit_record.is_none() {
+        return background;
+    }
+    let hit_record = maybe_hit_record.unwrap();
 
-                None => {
-                    return Colour {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 0.0,
-                    }
-                }
-            }
+    let emitted = hit_record.material.emitted(hit_record.u, hit_record.v, &hit_record.p);
+
+    let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
+    match maybe_reflection {
+        //todo rename colour to attenutation when i understand what that is.
+        Some((reflected_ray, surface_colour)) => {
+            let reflection_colour = ray_colour(reflected_ray, world, depth - 1, background);
+
+
+            return emitted.add(&Colour {
+                x: surface_colour.x * reflection_colour.x,
+                y: surface_colour.y * reflection_colour.y,
+                z: surface_colour.z * reflection_colour.z,
+            });
         }
 
-        None => {
-            //see other ray colour function
-            let unit_direction = ray.direction.unit_vector();
-            let t = 0.5 * (unit_direction.y + 1.0);
-            let white = Colour {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-            };
-            let colour2 = Colour {
-                x: 0.5,
-                y: 0.7,
-                z: 1.0,
-            };
-
-            return white.multiply(1.0 - t).add(&colour2.multiply(t));
-        }
+        None => { return emitted; }
     }
 }
 
@@ -403,27 +409,27 @@ impl Vec3 {
     }
 
     //for printing colours only
-    fn x_for_printing(&self) -> String {
-        // return ((255.999 * self.x) as i32).to_string();
-        return self.safe_colour_print(self.x);
-    }
-    fn y_for_printing(&self) -> String {
-        // return ((255.999 * self.y) as i32).to_string();
-        return self.safe_colour_print(self.y);
-    }
-    fn z_for_printing(&self) -> String {
-        // return ((255.999 * self.z) as i32).to_string();
-        return self.safe_colour_print(self.z);
-    }
+    // fn x_for_printing(&self) -> String {
+    //     // return ((255.999 * self.x) as i32).to_string();
+    //     return self.safe_colour_print(self.x);
+    // }
+    // fn y_for_printing(&self) -> String {
+    //     // return ((255.999 * self.y) as i32).to_string();
+    //     return self.safe_colour_print(self.y);
+    // }
+    // fn z_for_printing(&self) -> String {
+    //     // return ((255.999 * self.z) as i32).to_string();
+    //     return self.safe_colour_print(self.z);
+    // }
 
-    // Check that printing is outputing valid integer.
-    // Should be "Static" equivalent, but I'm on a plane and can't look it up.
-    fn safe_colour_print(&self, coord: f32) -> String {
-        let as_i32 = (255.999 * coord) as i32;
-        assert!(as_i32 >= 0, "failed to print because as_i32 is {}", as_i32);
-        assert!(as_i32 < 256, "failed to print because as_i32 is {}", as_i32);
-        return as_i32.to_string();
-    }
+    // // Check that printing is outputing valid integer.
+    // // Should be "Static" equivalent, but I'm on a plane and can't look it up.
+    // fn safe_colour_print(&self, coord: f32) -> String {
+    //     let as_i32 = (255.999 * coord) as i32;
+    //     assert!(as_i32 >= 0, "failed to print because as_i32 is {}", as_i32);
+    //     assert!(as_i32 < 256, "failed to print because as_i32 is {}", as_i32);
+    //     return as_i32.to_string();
+    // }
 
     fn near_zero(&self) -> bool {
         let threshold = 1e-8;
@@ -433,13 +439,13 @@ impl Vec3 {
 
 //todo have this or static method above but not both.
 fn safe_colour_print(coord: f32) -> String {
-    let as_i32 = (255.999 * coord) as i32;
+    let as_i32 = clamp(255.999 * coord, 0.0, 255.0) as i32;
     assert!(as_i32 >= 0, "failed to print because as_i32 is {}", as_i32);
     assert!(as_i32 < 256, "failed to print because as_i32 is {}", as_i32);
     return as_i32.to_string();
 }
 
-struct Ray {
+pub struct Ray {
     origin: Point3,
     direction: Point3,
 }
@@ -477,7 +483,7 @@ fn hit_record_with_norml<'a>(
 }
 
 #[derive(Clone)]
-struct HitRecord {
+pub struct HitRecord {
     // P is the point of hitting
     p: Point3,
     normal: Vec3,
@@ -491,18 +497,18 @@ struct HitRecord {
     v: f32,
 }
 
-impl HitRecord {
-    fn set_face_normal(&mut self, ray: &Ray, outward_normal: Vec3) {
-        // If the ray direciton and outward normal are in opposite direction (dot
-        // product < 0), then the ray is hitting the outside.
-        self.is_front_face = dot(ray.direction, outward_normal) < 0.0;
-        self.normal = if self.is_front_face {
-            outward_normal
-        } else {
-            outward_normal.multiply(-1.0)
-        };
-    }
-}
+// impl HitRecord {
+//     fn set_face_normal(&mut self, ray: &Ray, outward_normal: Vec3) {
+//         // If the ray direciton and outward normal are in opposite direction (dot
+//         // product < 0), then the ray is hitting the outside.
+//         self.is_front_face = dot(ray.direction, outward_normal) < 0.0;
+//         self.normal = if self.is_front_face {
+//             outward_normal
+//         } else {
+//             outward_normal.multiply(-1.0)
+//         };
+//     }
+// }
 
 #[derive(Clone, Copy)]
 struct HittableList<'a> {
@@ -513,7 +519,6 @@ impl HittableList<'_> {
     // impl HittableObject for HittableList<'_> {
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
         let mut temp_record = None;
-        let mut hit_anything = false;
         let mut closest_so_far = t_max;
 
         for scene_object in self.objects {
@@ -521,7 +526,6 @@ impl HittableList<'_> {
             match this_hit_record {
                 Some(hit_record) => {
                     closest_so_far = hit_record.t;
-                    hit_anything = true;
                     temp_record = Some(hit_record);
                 }
                 None => (),
@@ -605,7 +609,7 @@ impl Sphere {
         ));
     }
 
-    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+    fn bounding_box(&self, _time0: f32, _time1: f32) -> Option<BoundingBox> {
         let radius_box = Vec3 {
             x: self.radius,
             y: self.radius,
@@ -635,11 +639,6 @@ impl Sphere {
 }
 
 struct Camera {
-    aspect_ratio: f32,
-    viewport_height: f32,
-    viewport_width: f32,
-    focal_length: f32,
-
     origin: Point3,
     horizontal: Vec3,
     vertical: Vec3,
@@ -647,7 +646,6 @@ struct Camera {
 
     u: Vec3,
     v: Vec3,
-    w: Vec3,
     lens_radius: f32,
 }
 
@@ -695,11 +693,6 @@ fn build_camera(
     let u = cross(v_up, w);
     let v = cross(w, u);
 
-    // let viewport_height = 2.0;
-    // let aspect_ratio = 16.0 / 9.0;
-    // let viewport_width = aspect_ratio * viewport_height;
-    let focal_length = 1.0;
-
     let origin = look_from;
     let horizontal = u.multiply(viewport_width).multiply(focus_dist);
     let vertical = v.multiply(viewport_height).multiply(focus_dist);
@@ -712,11 +705,6 @@ fn build_camera(
     let lens_radius = aperture / 2.0;
 
     return Camera {
-        aspect_ratio: 16.0 / 9.0,
-        viewport_height,
-        viewport_width,
-        focal_length,
-
         origin,
         horizontal,
         vertical,
@@ -724,7 +712,6 @@ fn build_camera(
 
         u,
         v,
-        w,
         lens_radius,
     };
 }
@@ -744,12 +731,14 @@ fn clamp(x: f32, min: f32, max: f32) -> f32 {
 }
 
 fn random_unit() -> f32 {
-    let mut rng = rand::thread_rng();
+    // let mut rng = rand::thread_rng();
+    let mut rng = StdRng::seed_from_u64(230);
     return rng.gen_range(0.0..1.0);
 }
 
 fn random_vec3() -> Vec3 {
     let mut rng = rand::thread_rng();
+    // let mut rng = StdRng::seed_from_u64(230);
 
     return Vec3 {
         x: rng.gen_range(0.0..1.0),
@@ -788,10 +777,11 @@ fn random_unit_vector() -> Vec3 {
 }
 
 #[derive(Clone)]
-enum Material {
+pub enum Material {
     Lambertian(Lambertian),
     Metal(Metal),
     Dielectric(Dielectric),
+    DiffuseLight(DiffuseLight),
 }
 
 impl Material {
@@ -800,6 +790,20 @@ impl Material {
             Material::Lambertian(lambertian) => lambertian.scatter(ray_in, hit_record),
             Material::Metal(metal) => metal.scatter(ray_in, hit_record),
             Material::Dielectric(dielectric) => dielectric.scatter(ray_in, hit_record),
+            Material::DiffuseLight(diffuse_light) => diffuse_light.scatter(ray_in, hit_record),
+        }
+    }
+
+    fn emitted(&self, u: f32, v: f32, point: &Point3) -> Colour {
+        match *self {
+            Material::DiffuseLight(diffuse_light) => diffuse_light.emitted(u, v, point),
+            _ => {
+                return Colour {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                }
+            }
         }
     }
 }
@@ -809,13 +813,13 @@ impl Material {
 // }
 
 #[derive(Clone)]
-struct Lambertian {
+pub struct Lambertian {
     albedo: Arc<dyn Texture + Sync + Send>,
 }
 
 // impl Material for Lambertian {
 impl Lambertian {
-    fn scatter(&self, ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+    fn scatter(&self, _ray_in: Ray, hit_record: &HitRecord) -> Option<(Ray, Colour)> {
         let mut scatter_direction = hit_record.normal.add(&random_unit_vector());
         if scatter_direction.near_zero() {
             scatter_direction = hit_record.normal;
@@ -838,6 +842,20 @@ impl Lambertian {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct DiffuseLight {
+    colour: Colour,
+}
+impl DiffuseLight {
+    fn scatter(&self, _ray_in: Ray, _hit_record: &HitRecord) -> Option<(Ray, Colour)> {
+        return None;
+    }
+
+    fn emitted(&self, _u: f32, _v: f32, _point: &Point3) -> Colour {
+        return self.colour;
+    }
+}
+
 // I didn't really follow the whole derivation of this.
 // See section 10.2
 fn refract(uv: Vec3, normal: Vec3, eta_over_eta_prime: f32) -> Vec3 {
@@ -850,7 +868,7 @@ fn refract(uv: Vec3, normal: Vec3, eta_over_eta_prime: f32) -> Vec3 {
 }
 
 #[derive(Clone, Copy)]
-struct Metal {
+pub struct Metal {
     albedo: Colour,
     fuzz: f32,
 }
@@ -875,7 +893,7 @@ impl Metal {
 }
 
 #[derive(Clone, Copy)]
-struct Dielectric {
+pub struct Dielectric {
     index_of_refraction: f32,
 }
 impl Dielectric {
@@ -935,7 +953,7 @@ fn reflect(incoming_ray: Vec3, surface_normal: Vec3) -> Vec3 {
 }
 
 #[derive(Clone, Copy)]
-struct BoundingBox {
+pub struct BoundingBox {
     minimum: Point3,
     maximum: Point3,
 }
@@ -965,11 +983,8 @@ struct BoundingBox {
 
 //         let min = x_interval.0.min(y_interval.0.min(z_interval.0));
 //         let max = x_interval.1.max(y_interval.1.max(z_interval.1));
-
 //         return min < max;
-
 //     }
-
 // }
 
 impl BoundingBox {
@@ -979,10 +994,13 @@ impl BoundingBox {
         let y_interval = self.y_hit_interval(ray);
         let z_interval = self.z_hit_interval(ray);
 
-        let min = x_interval.0.min(y_interval.0.min(z_interval.0));
-        let max = x_interval.1.max(y_interval.1.max(z_interval.1));
+        // Now we have three time intervals where the ray crosses the bounding box, one for each axis.
+        // The box is hit IFF these boxes have non-zero intersection. That is, if the highest
+        // min is lower than the lowest max
+        let max_of_mins = t_min.max(x_interval.0.max(y_interval.0.max(z_interval.0)));
+        let min_of_maxes = t_max.min(x_interval.1.min(y_interval.1.min(z_interval.1)));
 
-        return min < max;
+        return max_of_mins < min_of_maxes;
     }
     fn x_hit_interval(&self, ray: &Ray) -> (f32, f32) {
         let x_hit_1 = (self.minimum.x - ray.origin.x) / ray.direction.x;
@@ -1027,6 +1045,7 @@ enum HittableObject<'a> {
     Sphere(Sphere),
     HittableList(HittableList<'a>),
     BVH(BVH<'a>),
+    Rectangle(Rectangle),
 }
 
 impl<'a> HittableObject<'a> {
@@ -1035,6 +1054,7 @@ impl<'a> HittableObject<'a> {
             HittableObject::Sphere(sphere) => sphere.hit(ray, t_min, t_max),
             HittableObject::BVH(bvh) => bvh.hit(ray, t_min, t_max),
             HittableObject::HittableList(hittable_list) => hittable_list.hit(ray, t_min, t_max),
+            HittableObject::Rectangle(rectangle) => rectangle.hit(ray, t_min, t_max),
         }
     }
     fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
@@ -1042,6 +1062,7 @@ impl<'a> HittableObject<'a> {
             HittableObject::Sphere(sphere) => sphere.bounding_box(time0, time1),
             HittableObject::BVH(bvh) => bvh.bounding_box(time0, time1),
             HittableObject::HittableList(hittable_list) => hittable_list.bounding_box(time0, time1),
+            HittableObject::Rectangle(rectangle) => rectangle.bounding_box(time0, time1),
         }
     }
 }
@@ -1146,7 +1167,7 @@ impl BVH<'_> {
         }
     }
 
-    fn bounding_box(&self, time0: f32, time1: f32) -> Option<BoundingBox> {
+    fn bounding_box(&self, _time0: f32, _time1: f32) -> Option<BoundingBox> {
         return Some(self.bounding_box);
     }
 }
