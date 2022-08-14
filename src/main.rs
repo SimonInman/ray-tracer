@@ -1,5 +1,6 @@
 pub mod texture;
 pub mod rectangle;
+pub mod scene_utils;
 
 use rand::Rng;
 use rand::SeedableRng;
@@ -8,19 +9,38 @@ use rayon::prelude::*;
 use rectangle::Rectangle;
 use std::cmp::Ordering;
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use texture::CheckerTexture;
 use texture::SolidColour;
 use texture::Texture;
+use scene_utils::rising_spiral;
 
 use std::sync::Arc;
 
 const MAX_T: f32 = 20000.0;
+const OUTPUT_DIR: &'static str = "output/gif7/";
+const FRAME_PREFIX: &'static str = "frame_";
+const FRAME_SUFFIX: &'static str = ".ppm";
+const NUM_FRAMES: usize = 20;
 
 fn main() {
+    for frame in 0..NUM_FRAMES {
+        let padded_frame =  format!("{:0>2}", frame);
+        let filepath = format!("{}{}{}{}", OUTPUT_DIR, FRAME_PREFIX, padded_frame, FRAME_SUFFIX);
+        let file = File::create(filepath).expect("file creation failed");
 
-    let args: Vec<String> = env::args().collect();
-    let light_z_axis_arg = &args[1];
-    let light_z_axis: f32 = light_z_axis_arg.parse().unwrap();
+        let light_position = rising_spiral(frame);
+
+        let light_z_axis_start = 1.0;
+        let frame_ticker = light_z_axis_start + 0.1 *  frame as f32;
+
+        println!("Rendering frame {}...", padded_frame);
+        render_frame(frame_ticker, light_position, file);
+    }
+}
+
+fn render_frame(frame_ticker: f32, light_position: Point3,  mut file: File) {
 
     // Image
     let aspect_ratio = 3.0 / 2.0;
@@ -31,14 +51,14 @@ fn main() {
     // let samples_per_pixel = 500;
     let max_depth = 50;
 
-    let mut build_spheres = many_spheres(light_z_axis);
+    let mut build_spheres = many_spheres(light_position);
     let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
     let boxed_world = HittableObject::BVH(world_bvh);
 
     let look_from = Point3 {
-        x: 13.0 + 1.0 - light_z_axis * 1.0 ,
-        y: 2.0 - 0.5 + light_z_axis * 0.5,
-        z: 3.0 - 2.3 + light_z_axis * 2.3,
+        x: 13.0 + 1.0 - frame_ticker * 1.0 ,
+        y: 2.0 - 0.5 + frame_ticker * 0.5,
+        z: 3.0 - 2.3 + frame_ticker * 2.3,
     };
     let look_at = Point3 {
         x: 0.0,
@@ -62,14 +82,13 @@ fn main() {
         dist_to_focus,
     );
     // let background = Colour{x: 0.70, y:  0.80,z: 1.00};
-    let black_background = Colour{x: 0.0, y:  0.0,z: 0.00};
+    let grey_background = Colour{x: 0.05, y: 0.05, z: 0.05};
  
-
     // Render
-    println!("P3");
-    println!("{}", image_width.to_string());
-    println!("{}", image_height.to_string());
-    println!("255");
+    writeln!(file, "P3").unwrap();
+    writeln!(file, "{}", image_width.to_string()).unwrap();
+    writeln!(file, "{}", image_height.to_string()).unwrap();
+    writeln!(file, "255").unwrap();
 
     // See https://raytracing.github.io/images/fig-1.03-cam-geom.jpg
     for j in (0..image_height).rev() {
@@ -84,7 +103,7 @@ fn main() {
                         ray,
                         &boxed_world,
                         max_depth,
-                        black_background,
+                        grey_background,
                     );
                 })
                 .reduce(
@@ -96,12 +115,12 @@ fn main() {
                     |accum, color| accum.add(&color),
                 );
 
-            write_pixel(aggregated_pixel, samples_per_pixel);
+            write_pixel(aggregated_pixel, samples_per_pixel, &mut file);
         }
     }
 }
 
-fn many_spheres(light_z_axis: f32) -> Vec<HittableObject<'static>> {
+fn many_spheres(light_position: Point3) -> Vec<HittableObject<'static>> {
     let light = DiffuseLight{colour: Colour{x:4.0, y:4.0, z:0.8}};
     let material_ground = Lambertian::new(Colour {
         x: 0.5,
@@ -224,34 +243,10 @@ fn many_spheres(light_z_axis: f32) -> Vec<HittableObject<'static>> {
     }));
 
     world_list.push(HittableObject::Sphere(Sphere {
-        centre: Vec3 {
-            x: 4.0,
-            y: 2.0 - light_z_axis * 0.05,
-            z: 0.0 + light_z_axis * 1.2,
-        },
+        centre: light_position,
         radius: 0.3,
         material: Material::DiffuseLight(light),
     }));
-
-    world_list.push(HittableObject::Sphere(Sphere {
-        centre: Vec3 {
-            x: 0.0 + light_z_axis * 0.2,
-            y: 2.0,
-            z: 0.0 + light_z_axis * 0.8,
-        },
-        radius: 0.3,
-        material: Material::DiffuseLight(light),
-    }));
-
-    // world_list.push(HittableObject::Rectangle(Rectangle::new(
-    //     3.0,
-    //     5.0,
-    //     1.0,
-    //     3.0,
-    //     light_z_axis,
-    //     Material::DiffuseLight(light)),
-    // ));
-
 
     return world_list;
 }
@@ -280,7 +275,7 @@ fn random_metal(rng: &mut StdRng) -> Metal {
     };
 }
 
-fn write_pixel(colour: Colour, samples_per_pixel: i32) {
+fn write_pixel(colour: Colour, samples_per_pixel: i32, file: &mut File) {
     let scale = 1.0 / (samples_per_pixel as f32);
     // Sqrt for gamma correction.
     let r = (colour.x * scale).sqrt();
@@ -293,7 +288,7 @@ fn write_pixel(colour: Colour, samples_per_pixel: i32) {
         safe_colour_print(b),
     ]
     .join(" ");
-    println!("{}", out);
+    writeln!(file, "{}", out).unwrap();
 }
 
 fn dot(a: Vec3, b: Vec3) -> f32 {
