@@ -1,12 +1,13 @@
-pub mod texture;
 pub mod rectangle;
 pub mod scene_utils;
+pub mod texture;
 
+use rand::rngs::StdRng;
 use rand::Rng;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
 use rayon::prelude::*;
 use rectangle::Rectangle;
+use scene_utils::rising_spiral;
 use std::cmp::Ordering;
 use std::env;
 use std::fs::File;
@@ -14,7 +15,6 @@ use std::io::Write;
 use texture::CheckerTexture;
 use texture::SolidColour;
 use texture::Texture;
-use scene_utils::rising_spiral;
 
 use std::sync::Arc;
 
@@ -26,22 +26,24 @@ const NUM_FRAMES: usize = 20;
 
 fn main() {
     for frame in 0..NUM_FRAMES {
-        let padded_frame =  format!("{:0>2}", frame);
-        let filepath = format!("{}{}{}{}", OUTPUT_DIR, FRAME_PREFIX, padded_frame, FRAME_SUFFIX);
+        let padded_frame = format!("{:0>2}", frame);
+        let filepath = format!(
+            "{}{}{}{}",
+            OUTPUT_DIR, FRAME_PREFIX, padded_frame, FRAME_SUFFIX
+        );
         let file = File::create(filepath).expect("file creation failed");
 
         let light_position = rising_spiral(frame);
 
         let light_z_axis_start = 1.0;
-        let frame_ticker = light_z_axis_start + 0.1 *  frame as f32;
+        let frame_ticker = light_z_axis_start + 0.1 * frame as f32;
 
         println!("Rendering frame {}...", padded_frame);
         render_frame(frame_ticker, light_position, file);
     }
 }
 
-fn render_frame(frame_ticker: f32, light_position: Point3,  mut file: File) {
-
+fn render_frame(frame_ticker: f32, light_position: Point3, mut file: File) {
     // Image
     let aspect_ratio = 3.0 / 2.0;
     let image_width = 600;
@@ -56,7 +58,7 @@ fn render_frame(frame_ticker: f32, light_position: Point3,  mut file: File) {
     let boxed_world = HittableObject::BVH(world_bvh);
 
     let look_from = Point3 {
-        x: 13.0 + 1.0 - frame_ticker * 1.0 ,
+        x: 13.0 + 1.0 - frame_ticker * 1.0,
         y: 2.0 - 0.5 + frame_ticker * 0.5,
         z: 3.0 - 2.3 + frame_ticker * 2.3,
     };
@@ -82,8 +84,12 @@ fn render_frame(frame_ticker: f32, light_position: Point3,  mut file: File) {
         dist_to_focus,
     );
     // let background = Colour{x: 0.70, y:  0.80,z: 1.00};
-    let grey_background = Colour{x: 0.05, y: 0.05, z: 0.05};
- 
+    let grey_background = Colour {
+        x: 0.05,
+        y: 0.05,
+        z: 0.05,
+    };
+
     // Render
     writeln!(file, "P3").unwrap();
     writeln!(file, "{}", image_width.to_string()).unwrap();
@@ -99,12 +105,7 @@ fn render_frame(frame_ticker: f32, light_position: Point3,  mut file: File) {
                     let u = (i as f32 + random_unit()) / (image_width as f32 - 1.0); // why minus one?
                     let v = (j as f32 + random_unit()) / (image_height as f32 - 1.0); // why minus one?
                     let ray = camera.get_ray(u, v);
-                    return ray_colour(
-                        ray,
-                        &boxed_world,
-                        max_depth,
-                        grey_background,
-                    );
+                    return ray_colour(ray, &boxed_world, max_depth, grey_background);
                 })
                 .reduce(
                     || Colour {
@@ -121,7 +122,13 @@ fn render_frame(frame_ticker: f32, light_position: Point3,  mut file: File) {
 }
 
 fn many_spheres(light_position: Point3) -> Vec<HittableObject<'static>> {
-    let light = DiffuseLight{colour: Colour{x:4.0, y:4.0, z:0.8}};
+    let light = DiffuseLight {
+        colour: Colour {
+            x: 4.0,
+            y: 4.0,
+            z: 0.8,
+        },
+    };
     let material_ground = Lambertian::new(Colour {
         x: 0.5,
         y: 0.5,
@@ -255,7 +262,7 @@ fn random_lambertian(rng: &mut StdRng) -> Lambertian {
     // Sample code does:
     // auto albedo = color::random() * color::random();
     // which is a pointwise multipleication of random colours.
-    let mut random_colour_value =| | ->  f32 { rng.gen_range(0.0..1.0) * rng.gen_range(0.0..1.0)};
+    let mut random_colour_value = || -> f32 { rng.gen_range(0.0..1.0) * rng.gen_range(0.0..1.0) };
     return Lambertian::new(Colour {
         x: random_colour_value(),
         y: random_colour_value(),
@@ -352,14 +359,15 @@ fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, background: Colour) 
     }
     let hit_record = maybe_hit_record.unwrap();
 
-    let emitted = hit_record.material.emitted(hit_record.u, hit_record.v, &hit_record.p);
+    let emitted = hit_record
+        .material
+        .emitted(hit_record.u, hit_record.v, &hit_record.p);
 
     let maybe_reflection = hit_record.material.scatter(ray, &hit_record);
     match maybe_reflection {
         //todo rename colour to attenutation when i understand what that is.
         Some((reflected_ray, surface_colour)) => {
             let reflection_colour = ray_colour(reflected_ray, world, depth - 1, background);
-
 
             return emitted.add(&Colour {
                 x: surface_colour.x * reflection_colour.x,
@@ -368,7 +376,9 @@ fn ray_colour(ray: Ray, world: &HittableObject, depth: i32, background: Colour) 
             });
         }
 
-        None => { return emitted; }
+        None => {
+            return emitted;
+        }
     }
 }
 
