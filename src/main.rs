@@ -36,9 +36,9 @@ fn main() {
     let boxed_world = HittableObject::BVH(world_bvh);
 
     let look_from = Point3 {
-        x: 13.0,
-        y: 2.0,
-        z: 3.0,
+        x: 13.0 + 1.0 - light_z_axis * 1.0 ,
+        y: 2.0 - 0.5 + light_z_axis * 0.5,
+        z: 3.0 - 2.3 + light_z_axis * 2.3,
     };
     let look_at = Point3 {
         x: 0.0,
@@ -102,7 +102,7 @@ fn main() {
 }
 
 fn many_spheres(light_z_axis: f32) -> Vec<HittableObject<'static>> {
-    let light = DiffuseLight{colour: Colour{x:4.0, y:4.0, z:4.0}};
+    let light = DiffuseLight{colour: Colour{x:4.0, y:4.0, z:0.8}};
     let material_ground = Lambertian::new(Colour {
         x: 0.5,
         y: 0.5,
@@ -223,14 +223,34 @@ fn many_spheres(light_z_axis: f32) -> Vec<HittableObject<'static>> {
         material: Material::Metal(material_metal),
     }));
 
-    world_list.push(HittableObject::Rectangle(Rectangle::new(
-        3.0,
-        5.0,
-        1.0,
-        3.0,
-        light_z_axis,
-        Material::DiffuseLight(light)),
-    ));
+    world_list.push(HittableObject::Sphere(Sphere {
+        centre: Vec3 {
+            x: 4.0,
+            y: 2.0 - light_z_axis * 0.05,
+            z: 0.0 + light_z_axis * 1.2,
+        },
+        radius: 0.3,
+        material: Material::DiffuseLight(light),
+    }));
+
+    world_list.push(HittableObject::Sphere(Sphere {
+        centre: Vec3 {
+            x: 0.0 + light_z_axis * 0.2,
+            y: 2.0,
+            z: 0.0 + light_z_axis * 0.8,
+        },
+        radius: 0.3,
+        material: Material::DiffuseLight(light),
+    }));
+
+    // world_list.push(HittableObject::Rectangle(Rectangle::new(
+    //     3.0,
+    //     5.0,
+    //     1.0,
+    //     3.0,
+    //     light_z_axis,
+    //     Material::DiffuseLight(light)),
+    // ));
 
 
     return world_list;
