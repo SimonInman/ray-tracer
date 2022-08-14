@@ -15,6 +15,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rayon::prelude::*;
 use rectangle::Rectangle;
+use scene_utils::circling_lights;
 use scene_utils::rising_spiral;
 use std::cmp::Ordering;
 use std::fs::File;
@@ -27,7 +28,7 @@ const MAX_T: f32 = 20000.0;
 const OUTPUT_DIR: &'static str = "output/gif7/";
 const FRAME_PREFIX: &'static str = "frame_";
 const FRAME_SUFFIX: &'static str = ".ppm";
-const NUM_FRAMES: usize = 20;
+const NUM_FRAMES: usize = 50;
 
 fn main() {
     for frame in 0..NUM_FRAMES {
@@ -38,17 +39,19 @@ fn main() {
         );
         let file = File::create(filepath).expect("file creation failed");
 
-        let light_position = rising_spiral(frame);
+        let mut build_spheres = many_spheres(frame);
+        let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
+        let boxed_world = HittableObject::BVH(world_bvh);
 
         let light_z_axis_start = 1.0;
         let frame_ticker = light_z_axis_start + 0.1 * frame as f32;
 
         println!("Rendering frame {}...", padded_frame);
-        render_frame(frame_ticker, light_position, file);
+        render_frame(frame_ticker, boxed_world, file);
     }
 }
 
-fn render_frame(frame_ticker: f32, light_position: Point3, mut file: File) {
+fn render_frame(frame_ticker: f32, boxed_world: HittableObject, mut file: File) {
     // Image
     let aspect_ratio = 3.0 / 2.0;
     let image_width = 600;
@@ -58,14 +61,10 @@ fn render_frame(frame_ticker: f32, light_position: Point3, mut file: File) {
     // let samples_per_pixel = 500;
     let max_depth = 50;
 
-    let mut build_spheres = many_spheres(light_position);
-    let world_bvh = BVH::build_bvh(&mut build_spheres, 0.0, 0.0);
-    let boxed_world = HittableObject::BVH(world_bvh);
-
     let look_from = Point3 {
         x: 13.0 + 1.0 - frame_ticker * 1.0,
-        y: 2.0 - 0.5 + frame_ticker * 0.5,
-        z: 3.0 - 2.3 + frame_ticker * 2.3,
+        y: 5.0 - 0.5 + frame_ticker * 0.5,
+        z: 7.0 - 2.3 + frame_ticker * 2.3,
     };
     let look_at = Point3 {
         x: 0.0,
@@ -88,11 +87,16 @@ fn render_frame(frame_ticker: f32, light_position: Point3, mut file: File) {
         aperture,
         dist_to_focus,
     );
-    // let background = Colour{x: 0.70, y:  0.80,z: 1.00};
+
+    // let background = Colour {
+    //     x: 0.70,
+    //     y: 0.80,
+    //     z: 1.00,
+    // };
     let grey_background = Colour {
-        x: 0.05,
-        y: 0.05,
-        z: 0.05,
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
     };
 
     // Render
@@ -126,7 +130,7 @@ fn render_frame(frame_ticker: f32, light_position: Point3, mut file: File) {
     }
 }
 
-fn many_spheres(light_position: Point3) -> Vec<HittableObject<'static>> {
+fn many_spheres(frame: usize) -> Vec<HittableObject<'static>> {
     let light = DiffuseLight {
         colour: Colour {
             x: 4.0,
@@ -255,10 +259,24 @@ fn many_spheres(light_position: Point3) -> Vec<HittableObject<'static>> {
     }));
 
     world_list.push(HittableObject::Sphere(Sphere {
-        centre: light_position,
-        radius: 0.3,
+        centre: rising_spiral(frame),
+        // Radius grows over first 10 frames
+        radius: 0.25 * (frame as f32 * 0.1).min(0.25),
         material: Material::DiffuseLight(light),
     }));
+    if frame > 10 {
+        let delayed_frame = frame - 10;
+        world_list.push(HittableObject::Sphere(Sphere {
+            centre: rising_spiral(delayed_frame),
+            // Radius grows over first 10 frames
+            radius: 0.25 * (delayed_frame as f32 * 0.1).min(0.25),
+            material: Material::DiffuseLight(light),
+        }));
+    }
+
+    let mut light_list = circling_lights(frame, 11, 5.0, 2.2);
+
+    world_list.append(&mut light_list);
 
     return world_list;
 }
@@ -801,25 +819,9 @@ pub struct BoundingBox {
 /// This gives an interval (t0, t1) for the intersection on one axis.
 /// Taking the intersection of these intervals on 3 axis will give you
 /// the interval the box is hit (if any).
-// impl HittableObject for BoundingBox {
-//     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> Option<HitRecord> {
-//         let mut min_so_far: f32 = t_min;
-//         let mut max_so_far: f32 = t_max;
-
-//         // todo divisions by zero
-//         let x_interval = self.x_hit_interval(ray);
-//         let y_interval = self.y_hit_interval(ray);
-//         let z_interval = self.z_hit_interval(ray);
-
-//         let min = x_interval.0.min(y_interval.0.min(z_interval.0));
-//         let max = x_interval.1.max(y_interval.1.max(z_interval.1));
-//         return min < max;
-//     }
-// }
-
 impl BoundingBox {
     fn hit(&self, ray: &Ray, t_min: f32, t_max: f32) -> bool {
-        // todo divisions by zero
+        // todo divisions by zero - actually maybe these work out fine with infinities?
         let x_interval = self.x_hit_interval(ray);
         let y_interval = self.y_hit_interval(ray);
         let z_interval = self.z_hit_interval(ray);
